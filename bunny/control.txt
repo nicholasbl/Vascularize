@@ -1,0 +1,5 @@
+mesh: bunny_low.obj
+voxel_size: .025
+output: out.obj
+prune: 4
+prune_flow: 20
