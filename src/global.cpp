@@ -102,6 +102,10 @@ bool parse_arguments(int argc, char* argv[]) {
         wire(file_data, "mesh", raw_path);
 
         c.mesh_path = control_dir / "." / raw_path;
+
+        if (!std::filesystem::is_regular_file(c.mesh_path)) {
+            throw std::runtime_error("Missing input mesh!");
+        }
     }
 
     wire(file_data, "voxel_size", c.cube_size);

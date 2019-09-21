@@ -40,6 +40,7 @@ static int make_percent(size_t value, size_t max) {
 }
 
 void flood_fill(MutableObject const& object, Grid3D<bool>& volume) {
+    fmt::print("Starting flood fill\n\n");
 
     static const glm::vec3 offset(.5);
 
