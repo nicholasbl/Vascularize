@@ -5,25 +5,37 @@
 
 #include <fstream>
 
+///
+/// \brief The MeshWriter class writes meshes. Yep.
+///
 class MeshWriter {
-    std::vector<glm::vec3>  m_position_list;
-    std::vector<glm::ivec3> m_face_list;
+    std::vector<glm::vec3>  m_position_list; ///< List of positions.
+    std::vector<glm::ivec3> m_face_list;     ///< List of faces.
 
 public:
     std::vector<glm::vec3>& positions() { return m_position_list; }
 
+    /// \brief Add a vertex to the writer buffer
+    /// \param p Position
+    /// \return List position of new vertex
     int add_vertex(glm::vec3 p) {
         auto place = m_position_list.size();
         m_position_list.push_back(p);
         return place;
     }
 
+    ///
+    /// \brief Add a new face using given vertex list positions
+    ///
     void add_face(int a, int b, int c) {
         assert(a != b and b != c and a != c);
 
         m_face_list.emplace_back(a + 1, b + 1, c + 1);
     }
 
+    ///
+    /// \brief Write mesh info to disk as a wavefront obj
+    ///
     void write_to(std::filesystem::path const& path) {
         std::ofstream stream(path);
 
@@ -39,12 +51,18 @@ public:
     }
 };
 
+///
+/// \brief The Basis struct helps create a coordinate basis to build tubes with.
+///
 struct Basis {
     glm::vec3 up;
     glm::vec3 side;
     glm::vec3 position;
 };
 
+///
+/// \brief Given an edge, build two basis to help build tubes with
+///
 std::array<Basis, 2> get_basis(SimpleGraph const& G, int64_t a, int64_t b) {
     auto apos = G.node(a).position;
     auto bpos = G.node(b).position;
@@ -64,6 +82,16 @@ std::array<Basis, 2> get_basis(SimpleGraph const& G, int64_t a, int64_t b) {
     return { { { up, side, apos }, { up, side, bpos } } };
 }
 
+constexpr float PI           = static_cast<float>(M_PI);
+constexpr float TWO_TIMES_PI = 2.0F * PI;
+
+///
+/// \brief Add a new ring to the mesh
+/// \param writer The writer buffer
+/// \param basis The basis to use to build the ring
+/// \param size The radius of the ring
+/// \param v_ids Output vertex ids we added to the mesh
+///
 void write_ring(MeshWriter&       writer,
                 Basis const&      basis,
                 float             size,
@@ -72,7 +100,7 @@ void write_ring(MeshWriter&       writer,
     v_ids.resize(num_segments);
 
     for (size_t i : xrange_over(v_ids)) {
-        float angle = 2.0 * M_PI * i / float(num_segments);
+        float angle = TWO_TIMES_PI * i / float(num_segments);
 
         glm::vec3 up   = basis.up * glm::sin(angle) * size;
         glm::vec3 side = basis.side * glm::cos(angle) * size;
@@ -82,12 +110,21 @@ void write_ring(MeshWriter&       writer,
     }
 }
 
-float compute_radius(float flow, float scale = .01) {
-    return std::max<float>(std::sqrt(flow / M_PI) * scale, 0.0001f);
+constexpr float MINIMUM_RADIUS = 0.0001F;
+
+///
+/// \brief Given a flow, map this to a radius
+///
+float compute_radius(float flow, float scale) {
+    return std::max<float>(std::sqrt(flow / PI) * scale, MINIMUM_RADIUS);
 }
 
+///
+/// \brief Prune leaves and nodes that dont meet the flow requirements
+///
 void prune(SimpleGraph& G, int rounds, float flow) {
     for (int i : xrange(rounds)) {
+        (void)i;
 
         std::unordered_map<int64_t, int> degrees;
 
@@ -100,6 +137,8 @@ void prune(SimpleGraph& G, int rounds, float flow) {
             if (deg == 1) G.remove_node(nid);
         }
     }
+
+    // We can't erase in one step, as there is some iterator weirdness, so...
 
     std::unordered_set<int64_t> to_erase;
 
@@ -114,7 +153,15 @@ void prune(SimpleGraph& G, int rounds, float flow) {
     }
 }
 
+constexpr float RELAXATION_FACTOR = .5F;
 
+///
+/// \brief Relax node positions
+/// \param G Graph
+/// \param a Upstream node
+/// \param n Node
+/// \param b Downstream node
+///
 void relax_part(SimpleGraph& G, int64_t a, int64_t n, int64_t b) {
     auto apos = G.node(a).position;
     auto npos = G.node(n).position;
@@ -122,11 +169,14 @@ void relax_part(SimpleGraph& G, int64_t a, int64_t n, int64_t b) {
 
     glm::vec3 midpoint = (apos + bpos) / 2.0f;
 
-    glm::vec3 new_pos = (midpoint - npos) * .5f + npos;
+    glm::vec3 new_pos = (midpoint - npos) * RELAXATION_FACTOR + npos;
 
     G.node(n).position = new_pos;
 }
 
+///
+/// \brief Relax all nodes
+///
 void relax(SimpleGraph& G) {
     for (auto const& [nid, ndata] : G.nodes()) {
         for (auto const& ea : G.edge(nid)) {
@@ -138,6 +188,8 @@ void relax(SimpleGraph& G) {
         }
     }
 }
+
+constexpr float RING_SCALE = .01F;
 
 void write_mesh_to(SimpleGraph&                 G,
                    SimpleTransform const&       tf,
@@ -157,8 +209,8 @@ void write_mesh_to(SimpleGraph&                 G,
         auto from_id = edge->a;
         auto to_id   = edge->b;
 
-        float size_a = compute_radius(G.node(from_id).flow);
-        float size_b = compute_radius(G.node(to_id).flow);
+        float size_a = compute_radius(G.node(from_id).flow, RING_SCALE);
+        float size_b = compute_radius(G.node(to_id).flow, RING_SCALE);
 
         auto tbasis = get_basis(G, from_id, to_id);
 

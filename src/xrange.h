@@ -4,6 +4,33 @@
 #include <iterator>
 #include <type_traits>
 
+/// \file Provides xrange, a range-for helper intended to eliminate the classic
+/// and error prone:
+///
+/// \code
+/// for (size_t i = 0; i < bound; ++i) {}
+/// \endcode
+///
+/// with
+///
+/// \code
+/// for (size_t i : xrange(bound)) {}
+/// \endcode
+///
+/// Includes \code xrange_over \endcode which can be used with a container.
+///
+/// \code
+/// std::vector<float> v;
+/// for (size_t i = 0; i < v.size(); ++i) { v[i]...; }
+/// \endcode
+///
+/// with
+///
+/// \code
+/// std::vector<float> v;
+/// for (size_t i : xrange_over(v)) { v[i]... }
+/// \endcode
+
 namespace xrange_detail {
 
 template <class T>
@@ -31,13 +58,9 @@ struct increment_iterator {
         return !(*this == other);
     }
 
-    T const& operator*() const {
-        return value;
-    }
+    T const& operator*() const { return value; }
 
-    T const* operator->() const {
-        return std::addressof(value);
-    }
+    T const* operator->() const { return std::addressof(value); }
 };
 
 template <class T>
@@ -68,26 +91,18 @@ struct stepping_iterator {
         return !(*this == other);
     }
 
-    T const& operator*() const {
-        return value;
-    }
+    T const& operator*() const { return value; }
 
-    T const* operator->() const {
-        return std::addressof(value);
-    }
+    T const* operator->() const { return std::addressof(value); }
 };
 
 template <class T>
 struct range_generator_single {
     T last;
 
-    increment_iterator<T> begin() {
-        return { 0 };
-    }
+    increment_iterator<T> begin() { return { 0 }; }
 
-    increment_iterator<T> end() {
-        return { last };
-    }
+    increment_iterator<T> end() { return { last }; }
 };
 
 
@@ -96,13 +111,9 @@ struct range_generator {
     T first;
     T last;
 
-    increment_iterator<T> begin() {
-        return { first };
-    }
+    increment_iterator<T> begin() { return { first }; }
 
-    increment_iterator<T> end() {
-        return { last };
-    }
+    increment_iterator<T> end() { return { last }; }
 };
 
 template <class T>
@@ -115,31 +126,24 @@ struct stepping_generator {
         return { first, (last - first) / step_size + 1, step_size };
     }
 
-    stepping_iterator<T> end() {
-        return { last, 0, step_size };
-    }
+    stepping_iterator<T> end() { return { last, 0, step_size }; }
 };
 
 } // namespace xrange_detail
 
 template <class T>
 xrange_detail::range_generator_single<T> xrange(T last) {
-    static_assert(std::is_integral<T>::value, "XRange only supports integral values");
+    static_assert(std::is_integral<T>::value,
+                  "XRange only supports integral values");
     return { last };
 }
 
 template <class T>
 xrange_detail::range_generator<T> xrange(T first, T last) {
-    static_assert(std::is_integral<T>::value, "XRange only supports integral values");
+    static_assert(std::is_integral<T>::value,
+                  "XRange only supports integral values");
     return { first, last };
 }
-
-//TODO FIX. exhibits weirdness
-//template <class T>
-//xrange_detail::stepping_generator<T> xrange(T first, T last, T step_by) {
-//   static_assert(std::is_integral<T>::value, "XRange only supports integral values");
-//    return { first, last, step_by };
-//}
 
 template <class Container>
 auto xrange_over(Container const& c) {

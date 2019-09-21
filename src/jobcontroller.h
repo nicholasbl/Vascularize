@@ -19,6 +19,9 @@ class JobController {
     size_t                         m_max_threads;
     std::vector<std::future<void>> m_active_jobs;
 
+    ///
+    /// \brief Flush work. Wait on all futures and clear work vector.
+    ///
     void flush();
 
 public:

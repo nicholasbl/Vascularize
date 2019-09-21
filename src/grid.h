@@ -13,8 +13,8 @@ template <typename T>
 class Grid3D {
     std::unique_ptr<T[]> m_data;
 
-    using DimType = std::array<size_t, 3>;
-    DimType m_dimensions;
+    using DimType        = std::array<size_t, 3>;
+    DimType m_dimensions = {};
 
     inline void init_size() {
         m_data = std::make_unique<T[]>(m_dimensions[0] * m_dimensions[1] *
@@ -47,8 +47,8 @@ public:
     Grid3D& operator=(Grid3D const&) = delete;
 
     // enable move
-    Grid3D(Grid3D&&) = default;
-    Grid3D& operator=(Grid3D&&) = default;
+    Grid3D(Grid3D&&) noexcept = default;
+    Grid3D& operator=(Grid3D&&) noexcept = default;
 
     /*!
      * \brief Set all grid points to the given value.
@@ -61,7 +61,7 @@ public:
     /*!
      * \brief The number of grid points.
      */
-    inline unsigned size() const {
+    [[nodiscard]] inline unsigned size() const {
         return m_dimensions[0] * m_dimensions[1] * m_dimensions[2];
     }
 
@@ -70,37 +70,37 @@ public:
      *
      * This can be used to index into an array
      */
-    inline unsigned index(size_t x, size_t y, size_t z) const {
+    [[nodiscard]] inline unsigned index(size_t x, size_t y, size_t z) const {
         return x + m_dimensions[0] * (y + m_dimensions[1] * z);
     }
 
     /*!
      * \brief The x dimension.
      */
-    inline size_t size_x() const { return m_dimensions[0]; }
+    [[nodiscard]] inline size_t size_x() const { return m_dimensions[0]; }
 
     /*!
      * \brief The y dimension.
      */
-    inline size_t size_y() const { return m_dimensions[1]; }
+    [[nodiscard]] inline size_t size_y() const { return m_dimensions[1]; }
 
     /*!
      * \brief The z dimension.
      */
-    inline size_t size_z() const { return m_dimensions[2]; }
+    [[nodiscard]] inline size_t size_z() const { return m_dimensions[2]; }
 
 
     /*!
      * \brief Access a grid point.
      */
-    T& operator()(size_t x, size_t y, size_t z) {
+    [[nodiscard]] T& operator()(size_t x, size_t y, size_t z) {
         return m_data[index(x, y, z)];
     }
 
     /*!
      * \brief Access a grid point.
      */
-    T const& operator()(size_t x, size_t y, size_t z) const {
+    [[nodiscard]] T const& operator()(size_t x, size_t y, size_t z) const {
         return m_data[index(x, y, z)];
     }
 
@@ -108,7 +108,7 @@ public:
      * \brief Access a grid point.
      */
     template <class VectorType>
-    T& operator()(VectorType t) {
+    [[nodiscard]] T& operator()(VectorType t) {
         return m_data[index(t.x, t.y, t.z)];
     }
 
@@ -116,7 +116,7 @@ public:
      * \brief Access a grid point.
      */
     template <class VectorType>
-    T const& operator()(VectorType t) const {
+    [[nodiscard]] T const& operator()(VectorType t) const {
         return m_data[index(t.x, t.y, t.z)];
     }
 
@@ -125,21 +125,21 @@ public:
      *
      * Useful for iterating through the grid.
      */
-    T& operator[](size_t x) { return m_data[x]; }
+    [[nodiscard]] T& operator[](size_t x) { return m_data[x]; }
 
     /*!
      * \brief Access a grid point by its linear index.
      *
      * Useful for iterating through the grid.
      */
-    T const& operator[](size_t x) const { return m_data[x]; }
+    [[nodiscard]] T const& operator[](size_t x) const { return m_data[x]; }
 
     /*!
      * \brief Access a grid point.
      *
      * This will throw if out of bounds.
      */
-    T& at(size_t x, size_t y, size_t z) {
+    [[nodiscard]] T& at(size_t x, size_t y, size_t z) {
         auto i = index(x, y, z);
         if (i >= size()) throw std::out_of_range("Grid index out of range");
         return m_data[i];
@@ -150,7 +150,7 @@ public:
      *
      * This will throw if out of bounds.
      */
-    T const& at(size_t x, size_t y, size_t z) const {
+    [[nodiscard]] T const& at(size_t x, size_t y, size_t z) const {
         auto i = index(x, y, z);
         if (i >= size()) throw std::out_of_range("Grid index out of range");
         return m_data[i];
@@ -163,9 +163,9 @@ public:
      * Useful to make sure accesses are not out of bound.
      */
     void clamp_bounds(size_t& x, size_t& y, size_t& z) const {
-        x = std::clamp(x, 0u, size_x() - 1);
-        y = std::clamp(y, 0u, size_y() - 1);
-        z = std::clamp(z, 0u, size_z() - 1);
+        x = std::clamp(x, 0U, size_x() - 1);
+        y = std::clamp(y, 0U, size_y() - 1);
+        z = std::clamp(z, 0U, size_z() - 1);
     }
 
 public:
@@ -189,8 +189,8 @@ public:
      *
      * Useful for network transmission, etc.
      */
-    T*       data() { return m_data.get(); }
-    T const* data() const { return m_data.get(); }
+    [[nodiscard]] T*       data() { return m_data.get(); }
+    [[nodiscard]] T const* data() const { return m_data.get(); }
 };
 
 #endif // GRID_H

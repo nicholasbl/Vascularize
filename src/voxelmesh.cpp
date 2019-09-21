@@ -27,7 +27,7 @@ bool is_point_in_object(MutableObject const& o, glm::vec3 const& p) {
             bool isects =
                 glm::intersectRayTriangle(p, direction, a, c, b, bary, dist);
 
-            isect_count += isects * dist > 0;
+            isect_count += static_cast<float>(isects) * dist > 0;
         }
     }
 
@@ -35,8 +35,13 @@ bool is_point_in_object(MutableObject const& o, glm::vec3 const& p) {
     return !is_even;
 }
 
+static int make_percent(size_t value, size_t max) {
+    return int((value / float(max)) * 100);
+}
 
 void flood_fill(MutableObject const& object, Grid3D<bool>& volume) {
+
+    static const glm::vec3 offset(.5);
 
     JobController controller;
 
@@ -44,7 +49,7 @@ void flood_fill(MutableObject const& object, Grid3D<bool>& volume) {
         for (size_t j : xrange(volume.size_y())) {
             for (size_t k : xrange(volume.size_z())) {
                 controller.add_job([&volume, &object, i, j, k]() {
-                    auto cube_point = glm::vec3(i, j, k) + glm::vec3(.5);
+                    auto cube_point = glm::vec3(i, j, k) + offset;
 
                     volume(i, j, k) = is_point_in_object(object, cube_point);
                 });
@@ -52,7 +57,7 @@ void flood_fill(MutableObject const& object, Grid3D<bool>& volume) {
         }
 
         fmt::print("\033[A\33[2KT\r{}% complete...\n",
-                   int((i / float(volume.size_x() - 1)) * 100));
+                   make_percent(i, volume.size_x() - 1));
     }
 }
 
@@ -76,7 +81,21 @@ void dump_mesh(std::vector<MutableObject> const& objects) {
     }
 }
 
-VoxelResult voxelize(std::vector<MutableObject>&& objects, float voxel_size) {
+static SimpleTransform make_transform(glm::vec3 voxel_grid_resolution,
+                                      glm::vec3 mesh_volume_size,
+                                      glm::vec3 bounding_box_minimum) {
+
+    glm::vec3 voxel_grid_res_sub1 = voxel_grid_resolution - glm::vec3(1);
+
+    glm::vec3 scale = voxel_grid_res_sub1 / mesh_volume_size;
+    glm::vec3 translate =
+        -(voxel_grid_res_sub1 * bounding_box_minimum) / mesh_volume_size;
+
+    return SimpleTransform(scale, translate);
+}
+
+
+VoxelResult voxelize(std::vector<MutableObject>&& objects, double voxel_size) {
 
     BoundingBox total_bb;
 
@@ -91,7 +110,8 @@ VoxelResult voxelize(std::vector<MutableObject>&& objects, float voxel_size) {
     fmt::print("Mesh bounds {} - {}\n", total_bb.minimum(), total_bb.maximum());
 
     auto voxel_grid_resolution =
-        glm::max(glm::ceil(mesh_volume_size / voxel_size), glm::vec3(1)) +
+        glm::max(glm::ceil(mesh_volume_size / static_cast<float>(voxel_size)),
+                 glm::vec3(1)) +
         glm::vec3(1);
 
     fmt::print("Voxel resolution {}\n", voxel_grid_resolution);
@@ -100,15 +120,13 @@ VoxelResult voxelize(std::vector<MutableObject>&& objects, float voxel_size) {
                      voxel_grid_resolution.y,
                      voxel_grid_resolution.z);
 
-    SimpleTransform tf;
-    tf.scale = (voxel_grid_resolution - glm::vec3(1)) / mesh_volume_size;
-    tf.translate =
-        -((voxel_grid_resolution - glm::vec3(1)) * total_bb.minimum()) /
-        mesh_volume_size;
+    SimpleTransform tf = make_transform(
+        voxel_grid_resolution, mesh_volume_size, total_bb.minimum());
+
 
     fmt::print("Mesh to grid transform: scale {}, translate {}\n",
-               tf.scale,
-               tf.translate);
+               tf.scale(),
+               tf.translate());
 
     // transform mesh into grid coordinates
     for (auto& o : objects) {

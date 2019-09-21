@@ -55,8 +55,6 @@ public:
     void        intersection(BoundingBox const& b);
     BoundingBox intersected(BoundingBox const& b) const;
     bool        intersects(BoundingBox const& b) const;
-    float       nearest(glm::vec3 const& p) const;
-    float       farthest(glm::vec3 const& p) const;
 
     glm::vec3 const& maximum() const;
     glm::vec3 const& minimum() const;

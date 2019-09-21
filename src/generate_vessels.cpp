@@ -1,5 +1,6 @@
 #include "generate_vessels.h"
 
+#include "global.h"
 #include "jobcontroller.h"
 #include "simplegraph.h"
 #include "xrange.h"
@@ -14,7 +15,8 @@
 #include <stack>
 #include <unordered_set>
 
-static std::vector<glm::i64vec3> const card_directions = []() {
+/// \brief All adjacent directions for a given cell
+static std::vector<glm::i64vec3> const directions = []() {
     std::vector<glm::i64vec3> ret;
 
     std::array<int, 3> ld = { -1, 0, 1 };
@@ -24,7 +26,7 @@ static std::vector<glm::i64vec3> const card_directions = []() {
             for (int z : ld) {
                 if (x == 0 and y == 0 and z == 0) continue;
 
-                ret.push_back({ x, y, z });
+                ret.emplace_back(x, y, z);
             }
         }
     }
@@ -32,6 +34,12 @@ static std::vector<glm::i64vec3> const card_directions = []() {
     return ret;
 }();
 
+///
+/// \brief Execute a function over a 3D grid.
+///
+/// \param g Graph to iterate over
+/// \param f Function, of signature (size_t i, size_t j, size_t k) -> void;
+///
 template <class GridType, class Function>
 void over_grid(GridType& g, Function&& f) {
     for (size_t i : xrange(g.size_x())) {
@@ -43,16 +51,29 @@ void over_grid(GridType& g, Function&& f) {
     }
 }
 
+///
+/// \brief Get an id for a coordinate in a grid.
+///
+/// \return id, or -1 if coordinate is invalid.
+///
 template <class T>
 int64_t id_for_coord(Grid3D<T> const& v, int64_t x, int64_t y, int64_t z) {
     if (x < 0 or y < 0 or z < 0) return -1;
 
-    if (x >= v.size_x() or y >= v.size_y() or z >= v.size_z()) return -1;
+    auto lx = static_cast<size_t>(x);
+    auto ly = static_cast<size_t>(y);
+    auto lz = static_cast<size_t>(z);
 
-    return v.index(x, y, z);
+    if (lx >= v.size_x() or ly >= v.size_y() or lz >= v.size_z()) return -1;
+
+    return v.index(lx, ly, lz);
 };
 
-
+///
+/// \brief Build initial superflow graph
+/// \param volume_fraction Grid of what is in and outside of a mesh
+/// \param G Superflow graph to build into
+///
 static void build_initial_networks(Grid3D<bool> const& volume_fraction,
                                    SimpleGraph&        G) {
 
@@ -60,7 +81,7 @@ static void build_initial_networks(Grid3D<bool> const& volume_fraction,
         return id_for_coord(volume_fraction, x, y, z);
     };
 
-    // populate graph with nodes
+    // populate graph with nodes first
 
     over_grid(volume_fraction, [&](size_t i, size_t j, size_t k) {
         bool is_in = volume_fraction(i, j, k);
@@ -76,37 +97,24 @@ static void build_initial_networks(Grid3D<bool> const& volume_fraction,
 
         G.add_node(cell_id, data);
     });
-
-    // connect them up
-
-    over_grid(volume_fraction, [&](size_t i, size_t j, size_t k) {
-        bool is_in = volume_fraction(i, j, k);
-
-        if (!is_in) return;
-
-        int64_t cell_id = get_id(i, j, k);
-        assert(cell_id >= 0);
-
-        for (auto const& dir : card_directions) {
-            auto    other_coord = glm::i64vec3(i, j, k) + dir;
-            int64_t other_cell_id =
-                get_id(other_coord.x, other_coord.y, other_coord.z);
-
-            if (other_cell_id < 0) continue;
-
-            bool other_cell_value =
-                volume_fraction(other_coord.x, other_coord.y, other_coord.z);
-
-            if (!other_cell_value) continue;
-        }
-    });
 }
 
+///@{
+/// Random sources and distributions
 static std::random_device                    random_device;
 static std::mt19937                          random_generator(random_device());
 static std::uniform_real_distribution<float> random_distribution_0_1(0.0, 1.0);
 static std::uniform_real_distribution<float> random_distribution_1_1(-1.0, 1.0);
+///@}
 
+///
+/// \brief Compute distances of nodes from the edge of the mesh
+/// \param volume_fraction What is in and out of the mesh
+/// \param G Superflow graph
+/// \param random_scale Random perturbation of the distances
+///
+/// Distances are normalized 0 -> 1
+///
 static void compute_distances(Grid3D<bool> const& volume_fraction,
                               SimpleGraph&        G,
                               float               random_scale) {
@@ -123,7 +131,7 @@ static void compute_distances(Grid3D<bool> const& volume_fraction,
 
         bool keep = false;
 
-        for (auto const& dir : card_directions) {
+        for (auto const& dir : directions) {
             auto other_coord = glm::i64vec3(i, j, k) + dir;
 
             int64_t other_cell_id = id_for_coord(
@@ -140,7 +148,7 @@ static void compute_distances(Grid3D<bool> const& volume_fraction,
         }
 
         if (keep) {
-            zero_list.push_back({ i, j, k });
+            zero_list.emplace_back(i, j, k);
         }
     });
 
@@ -183,10 +191,13 @@ static void compute_distances(Grid3D<bool> const& volume_fraction,
     float max_distance = iter->second.data.depth;
 
     for (auto& [key, node] : G.nodes()) {
-        node.data.depth = 1.0f - node.data.depth / max_distance;
+        node.data.depth = 1.0F - node.data.depth / max_distance;
     }
 }
 
+///
+/// \brief Connect all adjacent nodes based on high-to-low distances
+///
 static void connect_all_grad(Grid3D<bool> const& volume_fraction,
                              SimpleGraph&        G) {
 
@@ -196,7 +207,7 @@ static void connect_all_grad(Grid3D<bool> const& volume_fraction,
         auto this_id = id_for_coord(volume_fraction, i, j, k);
 
 
-        for (auto const& dir : card_directions) {
+        for (auto const& dir : directions) {
             auto other_coord = glm::i64vec3(i, j, k) + dir;
 
             int64_t other_cell_id = id_for_coord(
@@ -215,13 +226,16 @@ static void connect_all_grad(Grid3D<bool> const& volume_fraction,
             }
 
             EdgeData edata;
-            edata.weight = 10000 - delta;
+            edata.weight = -delta;
 
             G.add_edge(this_id, other_cell_id, edata);
         }
     });
 }
 
+///
+/// \brief Generate a random vector using a given radius scale
+///
 static glm::vec3 ball_random(float radius) {
     return glm::vec3(random_distribution_1_1(random_generator),
                      random_distribution_1_1(random_generator),
@@ -229,13 +243,21 @@ static glm::vec3 ball_random(float radius) {
            radius;
 }
 
+///
+/// \brief Jitter node positions
+///
 static void reposition(SimpleGraph& G) {
     for (auto& [key, node] : G.nodes()) {
-        node.data.position += ball_random(.5);
+        node.data.position +=
+            ball_random(global_configuration().position_randomness);
     }
 }
 
-int64_t get_starting_node(SimpleGraph const& G) {
+///
+/// \brief Figure a starting node for our flow tree. Picks the lowest distance
+/// value.
+///
+static int64_t get_starting_node(SimpleGraph const& G) {
     // pick node for now
 
     auto iter = std::min_element(
@@ -248,9 +270,15 @@ int64_t get_starting_node(SimpleGraph const& G) {
     return iter->first;
 }
 
+///
+/// \brief Build a flow tree
+///
 static SimpleTree build_tree(std::vector<EdgeKey> const& mst,
                              int64_t                     starting_node) {
 
+    // This is stupid but it makes it easier for me to think about.
+
+    // We create a graph of the tree first
 
     SimpleGraph precursor;
 
@@ -272,9 +300,9 @@ static SimpleTree build_tree(std::vector<EdgeKey> const& mst,
 
     assert(precursor.component_count() == 1);
 
-    SimpleTree tree;
+    // Now we build the tree
 
-    tree.set_root(starting_node);
+    SimpleTree tree(starting_node);
 
     std::unordered_set<int64_t> discovered_set;
 
@@ -305,7 +333,7 @@ static SimpleTree build_tree(std::vector<EdgeKey> const& mst,
 
     assert(tree.has_node(starting_node));
 
-    assert(validate_tree(tree));
+    assert(tree.validate_tree());
 
     assert(precursor.nodes().size() == discovered_set.size());
 
@@ -314,21 +342,10 @@ static SimpleTree build_tree(std::vector<EdgeKey> const& mst,
     return tree;
 }
 
-bool find(SimpleTree const& tree, int64_t a, int64_t b) {
-    if (a == b) return true;
-
-    for (auto n : tree.get_children_of(a)) {
-        if (find(tree, n, b)) return true;
-    }
-
-    return false;
-}
-
-bool is_dec_of(SimpleTree const& tree, int64_t a, int64_t b) {
-    return find(tree, a, b);
-}
-
-std::vector<int64_t> topological_sort(SimpleTree const& tree) {
+///
+/// \brief Sort nodes of the tree topologically
+///
+static std::vector<int64_t> topological_sort(SimpleTree const& tree) {
     std::vector<int64_t> ret;
 
     std::unordered_map<int64_t, int64_t> in_degree_map;
@@ -376,6 +393,9 @@ std::vector<int64_t> topological_sort(SimpleTree const& tree) {
     return ret;
 }
 
+///
+/// \brief Compute 'flow' which is the number of downstream nodes
+///
 static std::unordered_map<int64_t, float>
 compute_flow_size(SimpleTree const& tree) {
 
@@ -407,6 +427,9 @@ compute_flow_size(SimpleTree const& tree) {
     return ret;
 }
 
+///
+/// \brief build a final graph from flow, the MST, and the superflow graph
+///
 static SimpleGraph
 build_final_graph(std::unordered_map<int64_t, float> const& flow_data,
                   SimpleTree const&                         tree,
@@ -430,8 +453,11 @@ build_final_graph(std::unordered_map<int64_t, float> const& flow_data,
     return R;
 }
 
-void voxel_debug_dump(Grid3D<bool> const& grid, SimpleGraph const& G) {
-    std::ofstream stream("debug.csv");
+///
+/// \brief Dump voxels to a csv
+///
+static void voxel_debug_dump(Grid3D<bool> const& grid, SimpleGraph const& G) {
+    std::ofstream stream("voxels.csv");
 
     for (size_t i : xrange(grid.size_x())) {
         for (size_t j : xrange(grid.size_y())) {
@@ -459,7 +485,9 @@ SimpleGraph generate_vessels(Grid3D<bool> const& volume_fraction) {
     fmt::print("Graph has {} nodes. Computing distances\n", G.nodes().size());
     compute_distances(volume_fraction, G, 10);
 
-    // voxel_debug_dump(volume_fraction, G);
+    if (global_configuration().dump_voxels) {
+        voxel_debug_dump(volume_fraction, G);
+    }
 
     fmt::print("Connecting nodes\n");
     connect_all_grad(volume_fraction, G);

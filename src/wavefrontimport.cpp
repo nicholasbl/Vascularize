@@ -16,26 +16,24 @@
 
 using namespace mesh_detail;
 
+///
+/// \brief The WaveFrontVertSpec struct models a wavefront vertex
+///
+/// This was more complex if we needed normals, texture
+///
 struct WaveFrontVertSpec {
-    int32_t p_ind; // we cant just use a negative value here. some
-    int32_t t_ind; // variants of the format take joy in using negatives
-    int32_t n_ind;
+    // we cant just use a negative value to indicate unset.
+    // variants of the format take joy in using negatives.
 
-    bool p_ind_valid = false;
-    bool t_ind_valid = false;
-    bool n_ind_valid = false;
+    int32_t p_ind       = 0;     ///< Index
+    bool    p_ind_valid = false; ///< Is index valid?
 
+    ///
+    /// \brief Set position
+    ///
     inline void set_p(int32_t v) {
         p_ind       = v;
         p_ind_valid = true;
-    }
-    inline void set_t(int32_t v) {
-        t_ind       = v;
-        t_ind_valid = true;
-    }
-    inline void set_n(int32_t v) {
-        n_ind       = v;
-        n_ind_valid = true;
     }
 };
 
@@ -94,23 +92,11 @@ static WaveFrontVertSpec from_wavefront_face_string(std::string_view src) {
 
     auto size = splits.size();
 
-    switch (size) { // congrats on stupid
-    case 1:         // vertex only
-        ret.set_p(get_and_sanitize_index(splits[0]));
-        break;
-    case 2: // vertex and texture
-        ret.set_p(get_and_sanitize_index(splits[0]));
-        ret.set_t(get_and_sanitize_index(splits[1]));
-        break;
-    case 3: // vertex texture normal
-        ret.set_p(get_and_sanitize_index(splits[0]));
-        if (!splits[1].empty()) {
-            ret.set_t(get_and_sanitize_index(splits[1]));
-        }
-        ret.set_n(get_and_sanitize_index(splits[2]));
-        break;
-    default: throw std::runtime_error("Malformed obj face!");
+    if (size == 0) {
+        throw std::runtime_error("Malformed obj face!");
     }
+
+    ret.set_p(get_and_sanitize_index(splits[0]));
     return ret;
 }
 
@@ -122,37 +108,43 @@ void hash_combine(size_t& seed, T const& v) {
 namespace std {
 template <>
 struct hash<WaveFrontVertSpec> {
-    typedef WaveFrontVertSpec argument_type;
-    typedef size_t            result_type;
+    using argument_type = WaveFrontVertSpec;
+    using result_type   = size_t;
 
     result_type operator()(argument_type const& s) const {
         size_t seed = 0;
         hash_combine(seed, s.p_ind);
-        hash_combine(seed, s.t_ind);
-        hash_combine(seed, s.n_ind);
         return seed;
     }
 };
 } // namespace std
 
 bool operator<(WaveFrontVertSpec const& a, WaveFrontVertSpec const& b) {
-    return a.p_ind < b.p_ind and a.t_ind < b.t_ind and a.n_ind < b.n_ind;
+    return a.p_ind < b.p_ind;
 }
 
 bool operator==(WaveFrontVertSpec const& a, WaveFrontVertSpec const& b) {
-    return a.p_ind == b.p_ind and a.t_ind == b.t_ind and a.n_ind == b.n_ind;
+    return a.p_ind == b.p_ind;
 }
 
 struct WaveFrontMtl {
     glm::vec3 Kd = glm::vec3(1); // for now
 };
 
-class WaveFrontConverterData {
-    std::filesystem::path m_wavefront_file_path;
+static constexpr size_t OBJECT_MESH_LIMIT = 4000;
+static constexpr size_t MESH_FACE_LIMIT   = 65000;
 
-public:
+class WaveFrontConverterData {
+    std::filesystem::path      m_wavefront_file_path;
     std::vector<MutableObject> m_objects;
 
+    std::unordered_map<WaveFrontVertSpec, int> m_vert_pos_map;
+
+    std::vector<glm::vec3> m_file_verts;
+    std::vector<glm::vec2> m_file_tex;
+    std::vector<glm::vec3> m_file_nors;
+
+public:
     void push_new_object(std::string_view n) {
         m_objects.emplace_back(MutableObject());
         current_object().name = std::string(n);
@@ -163,8 +155,8 @@ public:
     void push_mesh() {
         assert(!m_objects.empty());
 
-        if (current_object().meshes.size() < 400) {
-            current_object().meshes.push_back(MutableMesh());
+        if (current_object().meshes.size() < OBJECT_MESH_LIMIT) {
+            current_object().meshes.emplace_back();
         } else {
             std::string      new_name = current_object().name + "_1";
             std::string_view r(new_name);
@@ -186,6 +178,8 @@ public:
         return current_object().meshes.back();
     }
 
+    auto& objects() { return m_objects; }
+
     void check() {
         for (auto& obj : m_objects) {
             while (obj.meshes.empty() and obj.meshes.back().vertex().empty()) {
@@ -193,16 +187,6 @@ public:
             }
         }
     }
-
-    std::unordered_map<WaveFrontVertSpec, int> m_vert_pos_map;
-
-    std::vector<glm::vec3> m_file_verts;
-    std::vector<glm::vec2> m_file_tex;
-    std::vector<glm::vec3> m_file_nors;
-
-    std::unordered_map<std::string, WaveFrontMtl> m_materials;
-    std::string                                   m_current_material_string;
-    WaveFrontMtl                                  m_current_material;
 
     WaveFrontConverterData(std::filesystem::path const& file_path)
         : m_wavefront_file_path(file_path) {
@@ -234,63 +218,16 @@ public:
         }
     }
 
-    void import_mtl(std::filesystem::path const& file_path) {
-        std::ifstream stream(file_path);
-
-        for (std::string line; std::getline(stream, line);) {
-            std::string_view view(line);
-
-            auto splits = split_ref(view, " ");
-
-            if (splits.empty()) continue;
-
-            if (splits[0] == "newmtl") {
-                std::string new_mat_name(splits.at(1));
-                m_materials[new_mat_name] = WaveFrontMtl();
-                m_current_material_string = new_mat_name;
-            } else if (splits[0] == "Kd") {
-                m_materials[m_current_material_string].Kd =
-                    glm::vec4(to_float(splits[1]),
-                              to_float(splits[2]),
-                              to_float(splits[3]),
-                              1);
-            }
-        }
-    }
-
-    // build a vertex from the source [ p, t, n ], including color from current
-    // material
-    // t and n may be -1 to skip
     Vertex construct_vert(WaveFrontVertSpec components) {
         Vertex v;
 
         int32_t p_index = components.p_ind;
         if (p_index < 0) {
-            // qDebug() << "reset" << p_index << m_file_verts.size() + p_index;
             p_index = m_file_verts.size() + p_index;
         }
 
         v.position = m_file_verts.at(p_index);
 
-        if (components.t_ind_valid) {
-            int32_t t_index = components.t_ind;
-            if (t_index < 0) {
-                t_index = m_file_tex.size() + t_index;
-            }
-
-            // v.texture = m_file_tex.at(t_index);
-        }
-
-        if (components.n_ind_valid) {
-            int32_t n_index = components.n_ind;
-            if (n_index < 0) {
-                n_index = m_file_nors.size() + n_index;
-            }
-
-            // v.normal = m_file_nors.at(n_index);
-        }
-
-        // v.set_color(m_current_material.Kd);
         return v;
     }
 
@@ -339,18 +276,6 @@ public:
                     }
                 }
 
-                if (fv.n_ind_valid) {
-                    if (fv.n_ind < 0 and !m_file_nors.empty()) {
-                        fv.n_ind = m_file_nors.size() + fv.n_ind;
-                    }
-                }
-
-                if (fv.t_ind_valid) {
-                    if (fv.t_ind < 0 and !m_file_tex.empty()) {
-                        fv.t_ind = m_file_tex.size() + fv.t_ind;
-                    }
-                }
-
                 auto iter = m_vert_pos_map.find(fv);
 
                 if (iter == m_vert_pos_map.end()) {
@@ -375,27 +300,16 @@ public:
 
             current_mesh().add(face);
 
-            if (current_mesh().vertex().size() >= 65000) {
+            if (current_mesh().vertex().size() >= MESH_FACE_LIMIT) {
                 m_vert_pos_map.clear();
                 push_mesh();
                 // qDebug() << "Mesh push";
             }
-        } else if (splits[0] == "usemtl") {
-            // qDebug() << "use material" << splits[1];
-            m_current_material_string = std::string(splits[1]);
-            auto iter = m_materials.find(m_current_material_string);
-            if (iter == m_materials.end()) {
-                fmt::print("no material found\n");
-            }
-            m_current_material = m_materials[m_current_material_string];
         } else if (splits[0] == "g" or splits[0] == "o") {
             std::string default_name("WF OB ");
             default_name += std::to_string(m_objects.size());
 
             push_new_object(std::string_view(default_name));
-
-        } else if (splits[0] == "mtllib") {
-            // do nothing
         }
     }
 };
@@ -405,7 +319,7 @@ ImportedMesh import_wavefront(std::filesystem::path const& path) {
     cv.check();
 
     ImportedMesh ret;
-    ret.objects = std::move(cv.m_objects);
+    ret.objects = std::move(cv.objects());
 
 
     return ret;

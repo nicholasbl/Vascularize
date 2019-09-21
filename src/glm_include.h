@@ -31,6 +31,7 @@
 
 #include <array>
 
+// Custom formatting for glm types
 namespace fmt {
 template <>
 struct formatter<glm::vec3> {
@@ -93,8 +94,6 @@ inline glm::dquat quat_from_array(std::array<double, 4> const& arr) {
     glm::dquat quat(arr[3], arr[0], arr[1], arr[2]);
     return glm::normalize(quat);
 }
-
-inline bool fuzzy_zero(float f) { return glm::abs(f) < .00001f; }
 
 /*!
  * \brief Convert a quat to a vector. Useful for shader variables.

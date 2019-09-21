@@ -34,11 +34,14 @@ public:
      */
     MutableMesh() = default;
 
+    ///
+    /// \brief Construct a mesh with given vertex and face list
+    ///
     MutableMesh(std::vector<mesh_detail::Vertex>&&,
                 std::vector<mesh_detail::Face>&&);
 
-    MutableMesh(MutableMesh const&) = default;
-    MutableMesh& operator=(MutableMesh const&) = default;
+    MutableMesh(MutableMesh const&) = delete;
+    MutableMesh& operator=(MutableMesh const&) = delete;
 
     MutableMesh(MutableMesh&&) = default;
     MutableMesh& operator=(MutableMesh&&) = default;
@@ -50,7 +53,6 @@ public:
 
     /*!
      * \brief Compute the bounding box of this mesh.
-     * \return The bounding box, as -x +x -y +y -z +z
      *
      * This is not cached, so calling bounds() multiple times is performance
      * negative.

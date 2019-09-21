@@ -19,7 +19,9 @@ struct ImportedMesh {
     std::vector<MutableObject> objects;
 };
 
-
+///
+/// \brief Read in a wavefront object from disk.
+///
 ImportedMesh import_wavefront(std::filesystem::path const&);
 
 #endif // WAVEFRONTIMPORT_H

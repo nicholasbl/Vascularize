@@ -1,5 +1,7 @@
 mesh: bunny_low.obj
 voxel_size: .025
 output: out.obj
+position_randomness: .5
 prune: 4
 prune_flow: 20
+dump_voxels: false

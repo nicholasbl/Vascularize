@@ -8,14 +8,6 @@
 #include <limits>
 #include <map>
 
-static_assert(sizeof(glm::vec3) == sizeof(float[3]));
-
-inline glm::vec2   average(glm::vec2 a, glm::vec2 b) { return (a + b) / 2.0f; }
-inline glm::vec3   average(glm::vec3 a, glm::vec3 b) { return (a + b) / 2.0f; }
-inline glm::u8vec4 average(glm::u8vec4 a, glm::u8vec4 b) {
-    return (glm::vec4(a) + glm::vec4(b)) / 2.0f;
-}
-
 void MutableMesh::add(mesh_detail::Vertex const& v) {
     m_verticies.push_back(v);
 }

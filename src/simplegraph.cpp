@@ -6,9 +6,9 @@
 #include <optional>
 #include <unordered_set>
 
-SimpleGraph::SimpleGraph() {}
+SimpleGraph::SimpleGraph() = default;
 
-SimpleGraph::~SimpleGraph() {}
+SimpleGraph::~SimpleGraph() = default;
 
 int64_t SimpleGraph::add_node(int64_t id, NodeData nd) {
     m_nodes.try_emplace(id, nd);
@@ -176,7 +176,7 @@ size_t SimpleGraph::component_count() const {
 }
 
 
-SimpleTree::SimpleTree() = default;
+SimpleTree::SimpleTree(int64_t root) : m_root(root) {}
 
 std::unordered_set<int64_t> const&
 SimpleTree::get_children_of(int64_t i) const {
@@ -194,41 +194,6 @@ size_t recursive_size_check(SimpleTree const& t, int64_t a) {
     return i;
 }
 
-bool validate_tree(SimpleTree const& t) {
-    std::unordered_set<int64_t> visited;
-
-    auto first = t.root();
-
-    assert(t.has_node(first));
-
-
-    std::function<bool(int64_t)> recursive_visit = [&](int64_t node) {
-        if (!t.has_node(node)) {
-            fmt::print("Missing node {}\n", node);
-            assert(0);
-        }
-
-        if (visited.count(node)) return false;
-
-        visited.insert(node);
-
-
-        for (auto id : t.get_children_of(node)) {
-            if (!recursive_visit(id)) return false;
-        }
-
-        return true;
-    };
-
-    if (!recursive_visit(first)) return false;
-
-    for (auto const& n : t.nodes()) {
-        if (!visited.count(n.first)) return false;
-    }
-
-    return true;
-}
-
 void SimpleTree::add_edge(int64_t a, int64_t b) {
     // we shouldn't be adding the same edge twice
     assert(m_nodes[a].out_ids.count(b) == 0);
@@ -239,3 +204,38 @@ void SimpleTree::add_edge(int64_t a, int64_t b) {
 
 
 size_t SimpleTree::node_count() const { return m_nodes.size(); }
+
+bool SimpleTree::validate_tree() {
+    std::unordered_set<int64_t> visited;
+
+    auto first = root();
+
+    assert(this->has_node(first));
+
+
+    std::function<bool(int64_t)> recursive_visit = [&](int64_t node) {
+        if (!this->has_node(node)) {
+            fmt::print("Missing node {}\n", node);
+            assert(0);
+        }
+
+        if (visited.count(node)) return false;
+
+        visited.insert(node);
+
+
+        for (auto id : this->get_children_of(node)) {
+            if (!recursive_visit(id)) return false;
+        }
+
+        return true;
+    };
+
+    if (!recursive_visit(first)) return false;
+
+    for (auto const& n : this->nodes()) {
+        if (!visited.count(n.first)) return false;
+    }
+
+    return true;
+}

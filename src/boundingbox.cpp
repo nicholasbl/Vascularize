@@ -2,17 +2,21 @@
 
 #include <ostream>
 
+///
+/// \brief A helper class for per-axis interval math.
+///
 template <class T>
-struct IntervalHelper {
+class IntervalHelper {
     T m_min;
     T m_max;
 
+public:
     IntervalHelper(T a, T b) : m_min(a), m_max(b) {}
 
     T distance(T p) {
         if (m_min > p) return m_min - p;
         if (m_max < p) return p - m_max;
-        return 0.0f;
+        return 0.0F;
     }
 
     bool intersects(IntervalHelper const& other) {
@@ -29,6 +33,9 @@ struct IntervalHelper {
         return IntervalHelper(std::max(m_min, other.m_min),
                               std::min(m_max, other.m_max));
     }
+
+    T interval_min() { return m_min; }
+    T interval_max() { return m_max; }
 };
 
 BoundingBox BoundingBox::make_infinite() {
@@ -40,7 +47,7 @@ BoundingBox BoundingBox::make_infinite() {
 glm::vec3 BoundingBox::center() const {
     if (!is_finite()) return glm::vec3(0);
 
-    auto half = (m_upper - m_lower) / float(2.0);
+    auto half = (m_upper - m_lower) / 2.0F;
     return m_lower + half;
 }
 
@@ -79,7 +86,7 @@ bool strict_less_than_eq(glm::vec3 const& a, glm::vec3 const& b) {
 
     for (size_t i = 0; i < 3; ++i) {
         // no, the below should not be <=
-        if (r[i] < 0.0f) return false;
+        if (r[i] < 0.0F) return false;
     }
     return true;
 }
@@ -132,7 +139,8 @@ void BoundingBox::intersection(BoundingBox const& b) {
 
     // both finite. get the intersection.
 
-    glm::vec3 new_min, new_max;
+    glm::vec3 new_min;
+    glm::vec3 new_max;
 
     for (size_t i = 0; i < 3; ++i) {
         IntervalHelper<float> our_interval(m_lower[i], m_upper[i]);
@@ -146,8 +154,8 @@ void BoundingBox::intersection(BoundingBox const& b) {
 
         auto isect = our_interval.intersection(their_interval);
 
-        new_min[i] = isect.m_min;
-        new_max[i] = isect.m_max;
+        new_min[i] = isect.interval_min();
+        new_max[i] = isect.interval_max();
     }
 
     set(new_min, new_max);
@@ -185,8 +193,8 @@ BoundingBox BoundingBox::intersected(BoundingBox const& b) const {
 
         auto isect = our_interval.intersection(their_interval);
 
-        new_min[i] = isect.m_min;
-        new_max[i] = isect.m_max;
+        new_min[i] = isect.interval_min();
+        new_max[i] = isect.interval_max();
     }
 
     return { new_min, new_max };
@@ -204,47 +212,6 @@ bool BoundingBox::intersects(BoundingBox const& b) const {
     }
     return true;
 }
-
-
-float BoundingBox::nearest(glm::vec3 const& p) const {
-    switch (m_state) {
-    case State::INVALID: return 0.0f;
-    case State::INFINITE: return 0.0f;
-    case State::FINITE: {
-        float dist(0);
-        for (size_t i = 0; i < 3; ++i) {
-            IntervalHelper<float> our_interval(m_lower[i], m_upper[i]);
-            dist += glm::pow(our_interval.distance(p[i]), 2);
-        }
-        return glm::sqrt(dist);
-    }
-    }
-
-    __builtin_unreachable();
-}
-
-
-float BoundingBox::farthest(glm::vec3 const& p) const {
-    switch (m_state) {
-    case State::INVALID: return std::numeric_limits<float>::max();
-    case State::INFINITE: return std::numeric_limits<float>::max();
-    case State::FINITE: {
-        float dist(0);
-        for (size_t i = 0; i < 3; ++i) {
-            auto center = float(0.5) * (m_lower[i] + m_upper[i]);
-            if (p[i] < center) {
-                dist += glm::pow(m_upper[i] - p[i], 2);
-            } else {
-                dist += glm::pow(p[i] - m_lower[i], 2);
-            }
-        }
-        return glm::sqrt(dist);
-    }
-    }
-
-    __builtin_unreachable();
-}
-
 
 glm::vec3 const& BoundingBox::maximum() const { return m_upper; }
 
