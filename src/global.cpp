@@ -48,6 +48,11 @@ std::string_view trim(std::string_view s) {
     return s;
 }
 
+
+std::istream& operator>>(std::istream& stream, glm::vec3& v) {
+    return stream >> v.x >> v.y >> v.z;
+}
+
 ///
 /// \brief Check a map for a given key, if it exists, interpret the value as T.
 ///
@@ -60,6 +65,28 @@ bool wire(std::unordered_map<std::string, std::string> const& map,
     if (iter == map.end()) return false;
 
     std::stringstream ss(iter->second);
+
+    ss >> std::boolalpha >> t;
+
+    return true;
+}
+
+///
+/// \brief Check a map for a given key, if it exists, interpret the value as T.
+///
+/// For optional types
+///
+template <class T>
+bool wire(std::unordered_map<std::string, std::string> const& map,
+          std::string const&                                  v,
+          std::optional<T>&                                   opt) {
+    auto iter = map.find(v);
+
+    if (iter == map.end()) return false;
+
+    std::stringstream ss(iter->second);
+
+    T& t = opt.emplace();
 
     ss >> std::boolalpha >> t;
 
@@ -95,13 +122,13 @@ bool parse_arguments(int argc, char* argv[]) {
         file_data[std::string(tokens.at(0))] = trim(tokens.at(1));
     }
 
-    auto control_dir = control_file.parent_path();
+    c.control_dir = control_file.parent_path();
 
     {
         std::string raw_path;
         wire(file_data, "mesh", raw_path);
 
-        c.mesh_path = control_dir / "." / raw_path;
+        c.mesh_path = c.control_dir / "." / raw_path;
 
         if (!std::filesystem::is_regular_file(c.mesh_path)) {
             throw std::runtime_error("Missing input mesh!");
@@ -116,7 +143,13 @@ bool parse_arguments(int argc, char* argv[]) {
         if (!wire(file_data, "output", raw_path)) {
             c.output_path = "out.obj";
         } else {
-            c.output_path = control_dir / "." / raw_path;
+            c.output_path = c.control_dir / "." / raw_path;
+        }
+    }
+
+    {
+        if (wire(file_data, "root_at", c.root_around)) {
+            assert(c.root_around);
         }
     }
 

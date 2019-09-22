@@ -1,12 +1,19 @@
 #ifndef GLOBAL_H
 #define GLOBAL_H
 
+#include "glm_include.h"
+
 #include <filesystem>
+#include <optional>
 
 struct Configuration {
+    std::filesystem::path control_dir; ///< Path to control directory
+
     std::filesystem::path mesh_path;     ///< Path to input mesh
     double                cube_size = 1; ///< voxel size
     std::filesystem::path output_path;   ///< Output mesh path
+
+    std::optional<glm::vec3> root_around; ///< Placement of vessel root
 
     float position_randomness = .5; ///< Random perturbation to node points
 

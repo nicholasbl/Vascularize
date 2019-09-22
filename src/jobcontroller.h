@@ -79,7 +79,7 @@ class JobController {
     std::queue<std::future<void>> m_active_jobs;
 
     ///
-    /// \brief Flush work. Wait on all futures and clear work vector.
+    /// \brief Flush wait on the front future of the queue so we can clear it
     ///
     void flush();
 

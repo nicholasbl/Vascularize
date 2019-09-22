@@ -3,6 +3,7 @@
 #include "global.h"
 #include "jobcontroller.h"
 #include "simplegraph.h"
+#include "voxelmesh.h"
 #include "xrange.h"
 
 #include <glm/gtx/norm.hpp>
@@ -74,14 +75,40 @@ int64_t id_for_coord(Grid3D<T> const& v, int64_t x, int64_t y, int64_t z) {
 /// \param volume_fraction Grid of what is in and outside of a mesh
 /// \param G Superflow graph to build into
 ///
-static void build_initial_networks(Grid3D<bool> const& volume_fraction,
-                                   SimpleGraph&        G) {
+static void build_initial_networks(Grid3D<bool> const&    volume_fraction,
+                                   SimpleTransform const& transform,
+                                   SimpleGraph&           G) {
 
     auto get_id = [&](int64_t x, int64_t y, int64_t z) -> int64_t {
         return id_for_coord(volume_fraction, x, y, z);
     };
 
     // populate graph with nodes first
+
+    // we can pre compute distances to the root here
+
+    std::optional<glm::vec3> point;
+    float                    max_distance = 0.0F;
+
+    if (global_configuration().root_around) {
+        point = transform(*(global_configuration().root_around));
+    }
+
+    auto distance_to_root = [point, &max_distance](glm::vec3 coordinate) {
+        float d;
+
+        if (!point) {
+            d = 1.0F;
+        } else {
+            d = glm::distance2(coordinate, *(point));
+        }
+
+        if (d > max_distance) {
+            max_distance = d;
+        }
+
+        return d;
+    };
 
     over_grid(volume_fraction, [&](size_t i, size_t j, size_t k) {
         bool is_in = volume_fraction(i, j, k);
@@ -94,9 +121,14 @@ static void build_initial_networks(Grid3D<bool> const& volume_fraction,
 
         NodeData data;
         data.position = glm::vec3(i, j, k);
+        data.depth    = distance_to_root(data.position);
 
         G.add_node(cell_id, data);
     });
+
+    for (auto& [key, value] : G.nodes()) {
+        value.data.depth /= max_distance;
+    }
 }
 
 ///@{
@@ -152,14 +184,24 @@ static void compute_distances(Grid3D<bool> const& volume_fraction,
         }
     });
 
+
     // compute min distances to zero points
-    {
-        JobController controller;
 
-        for (auto& [key, node] : G.nodes()) {
-            NodeData* ndata = &node.data;
+    std::unordered_map<int64_t, float> distances;
 
-            controller.add_job([ndata, &zero_list, random_scale]() {
+    // preallocate, because threads
+    for (auto& [key, node] : G.nodes()) {
+        distances[key] = 0;
+    }
+
+    JobController controller;
+
+    for (auto& [key, node] : G.nodes()) {
+        int64_t   nid   = key;
+        NodeData* ndata = &node.data;
+
+        controller.add_job(
+            [nid, ndata, &zero_list, &distances, random_scale]() {
                 // find min distance
 
                 auto node_coord = ndata->position;
@@ -177,21 +219,28 @@ static void compute_distances(Grid3D<bool> const& volume_fraction,
                 float random_value =
                     random_scale * random_distribution_0_1(random_generator);
 
-                ndata->depth = min_squared_distance + random_value;
+                // ndata->depth *= min_squared_distance + random_value;
+
+                distances.at(nid) = min_squared_distance + random_value;
             });
-        }
     }
 
     // find the max distance
     auto iter = std::max_element(
-        G.nodes().begin(), G.nodes().end(), [](auto const& a, auto const& b) {
-            return a.second.data.depth < b.second.data.depth;
+        distances.begin(), distances.end(), [](auto const& a, auto const& b) {
+            return a.second < b.second;
         });
 
-    float max_distance = iter->second.data.depth;
+    float max_distance = iter->second;
+
+    // fmt::print("MAX DISTANCE {}\n", max_distance);
+
+    for (auto& [key, value] : distances) {
+        value /= max_distance;
+    }
 
     for (auto& [key, node] : G.nodes()) {
-        node.data.depth = 1.0F - node.data.depth / max_distance;
+        node.data.depth = 1.0F - (distances[key] * node.data.depth);
     }
 }
 
@@ -257,15 +306,36 @@ static void reposition(SimpleGraph& G) {
 /// \brief Figure a starting node for our flow tree. Picks the lowest distance
 /// value.
 ///
-static int64_t get_starting_node(SimpleGraph const& G) {
-    // pick node for now
+static int64_t get_starting_node(SimpleGraph const&     G,
+                                 SimpleTransform const& transform) {
+
+    if (!global_configuration().root_around) {
+        // pick node
+
+        auto iter = std::min_element(G.nodes().begin(),
+                                     G.nodes().end(),
+                                     [](auto const& a, auto const& b) {
+                                         return a.second.data.depth <
+                                                b.second.data.depth;
+                                     });
+
+        assert(iter != G.nodes().end());
+
+        return iter->first;
+    }
+
+    glm::vec3 point = transform(*(global_configuration().root_around));
+
+    fmt::print("Root should be around: {} {} {}\n", point.x, point.y, point.z);
+
 
     auto iter = std::min_element(
-        G.nodes().begin(), G.nodes().end(), [](auto const& a, auto const& b) {
-            return a.second.data.depth < b.second.data.depth;
+        G.nodes().begin(),
+        G.nodes().end(),
+        [point](auto const& a, auto const& b) {
+            return glm::distance2(a.second.data.position, point) <
+                   glm::distance2(b.second.data.position, point);
         });
-
-    assert(iter != G.nodes().end());
 
     return iter->first;
 }
@@ -457,7 +527,7 @@ build_final_graph(std::unordered_map<int64_t, float> const& flow_data,
 /// \brief Dump voxels to a csv
 ///
 static void voxel_debug_dump(Grid3D<bool> const& grid, SimpleGraph const& G) {
-    std::ofstream stream("voxels.csv");
+    std::ofstream stream(global_configuration().control_dir / "voxels.csv");
 
     for (size_t i : xrange(grid.size_x())) {
         for (size_t j : xrange(grid.size_y())) {
@@ -474,13 +544,14 @@ static void voxel_debug_dump(Grid3D<bool> const& grid, SimpleGraph const& G) {
 }
 
 
-SimpleGraph generate_vessels(Grid3D<bool> const& volume_fraction) {
+SimpleGraph generate_vessels(Grid3D<bool> const&    volume_fraction,
+                             SimpleTransform const& transform) {
 
     SimpleGraph G;
 
     fmt::print("Building initial networks\n");
 
-    build_initial_networks(volume_fraction, G);
+    build_initial_networks(volume_fraction, transform, G);
 
     fmt::print("Graph has {} nodes. Computing distances\n", G.nodes().size());
     compute_distances(volume_fraction, G, 10);
@@ -497,7 +568,7 @@ SimpleGraph generate_vessels(Grid3D<bool> const& volume_fraction) {
 
     reposition(G);
 
-    auto starting_node = get_starting_node(G);
+    auto starting_node = get_starting_node(G, transform);
 
     fmt::print(
         "MST has {} edges. Build tree from {}\n", mst.size(), starting_node);

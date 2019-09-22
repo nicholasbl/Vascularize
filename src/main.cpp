@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
 
     fmt::print("Finished voxel grid, building flow graph\n");
 
-    auto flow_graph = generate_vessels(voxels);
+    auto flow_graph = generate_vessels(voxels, tf);
 
     auto out_path = global_configuration().output_path;
 
