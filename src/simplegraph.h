@@ -158,8 +158,9 @@ public:
     /// \brief Get the number of edges
     [[nodiscard]] size_t edge_count() const;
 
-    /// \brief Get the number of connected components
-    [[nodiscard]] size_t component_count() const;
+    /// \brief Get connected components
+    /// \return A map from node to component number
+    [[nodiscard]] std::unordered_map<int64_t, size_t> components() const;
 };
 
 ///

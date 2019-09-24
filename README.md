@@ -59,5 +59,6 @@ The graph is then turned into a mesh. We first prune parts of the graph, leaves 
 
 ## Todo
 
-* Add user selected root
 * Improve mesh generation
+* Improve threading
+* Improve voxelization. Use a tet vol approach?

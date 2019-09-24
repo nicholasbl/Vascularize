@@ -282,6 +282,47 @@ static void connect_all_grad(Grid3D<bool> const& volume_fraction,
     });
 }
 
+static void clean_components(SimpleGraph& G) {
+
+    // which is the largest?
+
+    auto components = G.components();
+
+    if (components.empty()) {
+        throw std::runtime_error(
+            "No components found! Broken component cleaner!");
+    }
+
+    fmt::print("Found {} components\n", components.size());
+
+    std::vector<size_t> component_counts(components.size());
+
+    for (auto [nid, cid] : components) {
+        if (component_counts.size() <= cid) {
+            component_counts.resize(cid + 1);
+        }
+        component_counts.at(cid)++;
+    }
+
+    auto iter =
+        std::max_element(component_counts.begin(), component_counts.end());
+
+    if (iter == component_counts.end()) {
+        throw std::runtime_error("Broken component counter!");
+    }
+
+    size_t largest_component =
+        std::labs(std::distance(component_counts.begin(), iter));
+
+    // remove any node that is not part of this component
+
+    fmt::print("Using component {} with {} nodes\n", largest_component, *iter);
+
+    for (auto [nid, cid] : components) {
+        if (cid != largest_component) G.remove_node(nid);
+    }
+}
+
 ///
 /// \brief Generate a random vector using a given radius scale
 ///
@@ -367,8 +408,6 @@ static SimpleTree build_tree(std::vector<EdgeKey> const& mst,
     }
 
     assert(precursor.has_node(starting_node));
-
-    assert(precursor.component_count() == 1);
 
     // Now we build the tree
 
@@ -562,6 +601,10 @@ SimpleGraph generate_vessels(Grid3D<bool> const&    volume_fraction,
 
     fmt::print("Connecting nodes\n");
     connect_all_grad(volume_fraction, G);
+
+    // we may get multiple components. For now, just pick the largest one.
+    fmt::print("Cleaning components\n");
+    clean_components(G);
 
     fmt::print("Graph has {} edges. Compute MST\n", G.edge_count());
     auto mst = G.compute_min_spanning_tree();

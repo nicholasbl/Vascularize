@@ -147,32 +147,42 @@ std::vector<EdgeKey> SimpleGraph::compute_min_spanning_tree() const {
 
 size_t SimpleGraph::edge_count() const { return m_edges.size(); }
 
-static void recursive_color(SimpleGraph const&                   G,
-                            std::unordered_map<int64_t, size_t>& colors,
-                            int64_t                              node,
-                            size_t                               color) {
-    auto [iter, inserted] = colors.try_emplace(node, color);
+static void color(SimpleGraph const&                   G,
+                  std::unordered_map<int64_t, size_t>& colors,
+                  int64_t                              starting_node,
+                  size_t                               color) {
 
-    if (!inserted) return;
+    std::vector<int64_t> stack;
 
-    for (auto const& [other_id, edata] : G.edge(node)) {
-        recursive_color(G, colors, other_id, color);
+    stack.push_back(starting_node);
+
+    while (!stack.empty()) {
+        auto node = stack.back();
+        stack.pop_back();
+
+        if (colors.count(node)) continue;
+
+        colors[node] = color;
+
+        for (auto const& [other_id, edata] : G.edge(node)) {
+            stack.push_back(other_id);
+        }
     }
 }
 
-size_t SimpleGraph::component_count() const {
+std::unordered_map<int64_t, size_t> SimpleGraph::components() const {
     size_t                              marker = 0;
     std::unordered_map<int64_t, size_t> colors;
 
     for (auto const& [nid, ndata] : m_nodes) {
         if (colors.count(nid)) continue;
 
-        recursive_color(*this, colors, nid, marker);
+        color(*this, colors, nid, marker);
 
         marker++;
     }
 
-    return marker;
+    return colors;
 }
 
 
