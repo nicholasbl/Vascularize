@@ -5,13 +5,38 @@
 #include "xrange.h"
 
 #include <fmt/printf.h>
+
+#include <glm/gtx/component_wise.hpp>
 #include <glm/gtx/intersect.hpp>
 
-// FOR DEBUGGING
 #include <fstream>
+#include <random>
 
-bool is_point_in_object(MutableObject const& o, glm::vec3 const& p) {
-    glm::vec3 direction(1, 0, 0);
+///@{
+/// Random sources and distributions
+static std::random_device                    random_device;
+static std::mt19937                          random_generator(random_device());
+static std::uniform_real_distribution<float> random_distribution_1_1(-1.0, 1.0);
+///@}
+
+///
+/// \brief Generate a float, [-1, 1] to help build random directions
+///
+static float random_axis() { return random_distribution_1_1(random_generator); }
+
+///
+/// \brief Generate a random unit vector
+///
+static glm::vec3 random_dir() {
+    return glm::normalize(
+        glm::vec3(random_axis(), random_axis(), random_axis()) * 2.0f - 1.0f);
+}
+
+///
+/// \brief Ask if a point is within a mesh
+///
+static bool is_point_in_object(MutableObject const& o, glm::vec3 const& p) {
+    glm::vec3 direction = random_dir();
 
     size_t isect_count = 0;
 
@@ -32,15 +57,15 @@ bool is_point_in_object(MutableObject const& o, glm::vec3 const& p) {
     }
 
     bool is_even = isect_count % 2 == 0;
+
     return !is_even;
 }
 
-static int make_percent(size_t value, size_t max) {
-    return int((value / float(max)) * 100);
-}
-
-void flood_fill(MutableObject const& object, Grid3D<bool>& volume) {
-    fmt::print("Starting flood fill\n\n");
+///
+/// \brief Check every point in our grid to see if it is inside the mesh
+///
+void grid_fill(MutableObject const& object, Grid3D<bool>& volume) {
+    fmt::print("Starting grid fill\n");
 
     static const glm::vec3 offset(.5);
 
@@ -48,36 +73,13 @@ void flood_fill(MutableObject const& object, Grid3D<bool>& volume) {
 
     for (size_t i : xrange(volume.size_x())) {
         for (size_t j : xrange(volume.size_y())) {
-            for (size_t k : xrange(volume.size_z())) {
-                controller.add_job([&volume, &object, i, j, k]() {
+            controller.add_job([&volume, &object, i, j]() {
+                for (size_t k : xrange(volume.size_z())) {
                     auto cube_point = glm::vec3(i, j, k) + offset;
 
                     volume(i, j, k) = is_point_in_object(object, cube_point);
-                });
-            }
-        }
-
-        fmt::print("\033[A\33[2KT\r{}% complete...\n",
-                   make_percent(i, volume.size_x() - 1));
-    }
-}
-
-void dump_mesh(std::vector<MutableObject> const& objects) {
-    std::ofstream stream("debug.obj");
-
-    for (auto& o : objects) {
-        for (auto& mesh : o.meshes) {
-
-            for (auto& v : mesh.vertex()) {
-                stream << "v " << v.position.x << " " << v.position.y << " "
-                       << v.position.z << std::endl;
-            }
-
-            for (auto& face : mesh.faces()) {
-                stream << "f " << face.indicies[0] + 1 << " "
-                       << face.indicies[1] + 1 << " " << face.indicies[2] + 1
-                       << std::endl;
-            }
+                }
+            });
         }
     }
 }
@@ -138,12 +140,10 @@ VoxelResult voxelize(std::vector<MutableObject>&& objects, double voxel_size) {
         }
     }
 
-    // dump_mesh(objects);
-
     fmt::print("Starting object voxelization\n");
 
     for (auto const& o : objects) {
-        flood_fill(o, ret);
+        grid_fill(o, ret);
     }
 
     return { std::move(ret), tf };

@@ -72,13 +72,18 @@ static size_t get_number_of_threads() {
     size_t threads = std::thread::hardware_concurrency();
 
     // Some implementations don't provide the thread count, and return a 0
-    if (threads < 1) threads = 4;
+    if (threads < 1) {
+
+        threads = 4;
+    }
+
+    fmt::print("Using {} threads\n", threads);
 
     return threads;
 }
 
 JobController::JobController()
-    : m_max_threads(get_number_of_threads()), m_executor(m_max_threads) {}
+    : m_max_threads(get_number_of_threads() * 2), m_executor(m_max_threads) {}
 
 JobController::~JobController() {
     while (m_active_jobs.size()) {

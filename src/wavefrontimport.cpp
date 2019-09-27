@@ -321,6 +321,5 @@ ImportedMesh import_wavefront(std::filesystem::path const& path) {
     ImportedMesh ret;
     ret.objects = std::move(cv.objects());
 
-
     return ret;
 }

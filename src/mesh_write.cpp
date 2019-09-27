@@ -124,7 +124,8 @@ float compute_radius(float flow, float scale) {
 ///
 void prune(SimpleGraph& G, int rounds, float flow) {
     for (int i : xrange(rounds)) {
-        (void)i;
+
+        size_t pruned_count = 0;
 
         std::unordered_map<int64_t, int> degrees;
 
@@ -134,9 +135,17 @@ void prune(SimpleGraph& G, int rounds, float flow) {
 
 
         for (auto const& [nid, deg] : degrees) {
-            if (deg == 1) G.remove_node(nid);
+            if (deg == 1) {
+                pruned_count++;
+                G.remove_node(nid);
+            }
         }
+
+        fmt::print("Prune round {}, removed {}\n", i, pruned_count);
     }
+
+
+    if (flow <= 0) return;
 
     // We can't erase in one step, as there is some iterator weirdness, so...
 
@@ -151,6 +160,8 @@ void prune(SimpleGraph& G, int rounds, float flow) {
     for (auto nid : to_erase) {
         G.remove_node(nid);
     }
+
+    fmt::print("Culled {} nodes based on flow < {}\n", to_erase.size(), flow);
 }
 
 constexpr float RELAXATION_FACTOR = .5F;
@@ -228,6 +239,8 @@ void write_mesh_to(SimpleGraph&                 G,
     for (auto& p : writer.positions()) {
         p = tf.inverted(p);
     }
+
+    fmt::print("Writing geometry to {}\n", path.c_str());
 
     writer.write_to(path);
 }
