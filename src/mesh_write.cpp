@@ -1,128 +1,59 @@
 #include "mesh_write.h"
 #include "global.h"
+#include "jobcontroller.h"
 #include "voxelmesh.h"
 #include "xrange.h"
 
+#include <openvdb/tools/Composite.h>
+#include <openvdb/tools/VolumeToMesh.h>
+
 #include <fstream>
 
-///
-/// \brief The MeshWriter class writes meshes. Yep.
-///
-class MeshWriter {
-    std::vector<glm::vec3>  m_position_list; ///< List of positions.
-    std::vector<glm::ivec3> m_face_list;     ///< List of faces.
+using ByteTree = openvdb::tree::Tree4<uint8_t, 5, 4, 3>::Type;
+using ByteGrid = openvdb::Grid<ByteTree>;
 
-public:
-    std::vector<glm::vec3>& positions() { return m_position_list; }
+constexpr float RAIDUS_SCALE      = .01F;
+constexpr float PI                = static_cast<float>(M_PI);
+constexpr float MINIMUM_RADIUS    = 0.0001F;
+constexpr int   VOXEL_INFLATION   = 5;
+constexpr float RELAXATION_FACTOR = .5F;
 
-    /// \brief Add a vertex to the writer buffer
-    /// \param p Position
-    /// \return List position of new vertex
-    int add_vertex(glm::vec3 p) {
-        auto place = m_position_list.size();
-        m_position_list.push_back(p);
-        return place;
-    }
-
-    ///
-    /// \brief Add a new face using given vertex list positions
-    ///
-    void add_face(int a, int b, int c) {
-        assert(a != b and b != c and a != c);
-
-        m_face_list.emplace_back(a + 1, b + 1, c + 1);
-    }
-
-    ///
-    /// \brief Write mesh info to disk as a wavefront obj
-    ///
-    void write_to(std::filesystem::path const& path) {
-        std::ofstream stream(path);
-
-        stream << "o vascularization\n";
-
-        for (auto p : m_position_list) {
-            stream << "v " << p.x << " " << p.y << " " << p.z << "\n";
-        }
-
-        for (auto f : m_face_list) {
-            stream << "f " << f.x << " " << f.y << " " << f.z << "\n";
-        }
-    }
-};
-
-///
-/// \brief The Basis struct helps create a coordinate basis to build tubes with.
-///
-struct Basis {
-    glm::vec3 up;
-    glm::vec3 side;
-    glm::vec3 position;
-};
-
-///
-/// \brief Given an edge, build two basis to help build tubes with
-///
-std::array<Basis, 2> get_basis(SimpleGraph const& G, int64_t a, int64_t b) {
-    auto apos = G.node(a).position;
-    auto bpos = G.node(b).position;
-
-    auto dir = glm::normalize(bpos - apos);
-
-    auto starting_up = glm::vec3(1, 0, 0);
-
-    if (dir == starting_up) {
-        starting_up = glm::normalize(glm::vec3(1, 1, 0));
-    }
-
-    auto side = glm::normalize(glm::cross(starting_up, dir));
-
-    auto up = glm::normalize(glm::cross(dir, side));
-
-    return { { { up, side, apos }, { up, side, bpos } } };
-}
-
-constexpr float PI           = static_cast<float>(M_PI);
-constexpr float TWO_TIMES_PI = 2.0F * PI;
-
-///
-/// \brief Add a new ring to the mesh
-/// \param writer The writer buffer
-/// \param basis The basis to use to build the ring
-/// \param size The radius of the ring
-/// \param v_ids Output vertex ids we added to the mesh
-///
-void write_ring(MeshWriter&       writer,
-                Basis const&      basis,
-                float             size,
-                std::vector<int>& v_ids) {
-    constexpr size_t num_segments = 6;
-    v_ids.resize(num_segments);
-
-    for (size_t i : xrange_over(v_ids)) {
-        float angle = TWO_TIMES_PI * i / float(num_segments);
-
-        glm::vec3 up   = basis.up * glm::sin(angle) * size;
-        glm::vec3 side = basis.side * glm::cos(angle) * size;
-        glm::vec3 p    = basis.position + up + side;
-
-        v_ids[i] = writer.add_vertex(p);
-    }
-}
-
-constexpr float MINIMUM_RADIUS = 0.0001F;
 
 ///
 /// \brief Given a flow, map this to a radius
 ///
-float compute_radius(float flow, float scale) {
-    return std::max<float>(std::sqrt(flow / PI) * scale, MINIMUM_RADIUS);
+float compute_radius(float flow) {
+    return std::max<float>(std::sqrt(flow / PI) * RAIDUS_SCALE, MINIMUM_RADIUS);
 }
 
 ///
 /// \brief Prune leaves and nodes that dont meet the flow requirements
 ///
-void prune(SimpleGraph& G, int rounds, float flow) {
+void prune(SimpleGraph& G) {
+    int   rounds = global_configuration().prune_rounds;
+    float flow   = global_configuration().prune_flow;
+
+    if (flow > 0) {
+        // We can't erase in one step, as there is some iterator weirdness,
+        // so...
+
+        std::unordered_set<int64_t> to_erase;
+
+        for (auto const& [nid, data] : G.nodes()) {
+            if (G.node(nid).flow < flow) {
+                to_erase.insert(nid);
+            }
+        }
+
+        for (auto nid : to_erase) {
+            G.remove_node(nid);
+        }
+
+        fmt::print(
+            "Culled {} nodes based on flow < {}\n", to_erase.size(), flow);
+    }
+
+
     for (int i : xrange(rounds)) {
 
         size_t pruned_count = 0;
@@ -143,28 +74,7 @@ void prune(SimpleGraph& G, int rounds, float flow) {
 
         fmt::print("Prune round {}, removed {}\n", i, pruned_count);
     }
-
-
-    if (flow <= 0) return;
-
-    // We can't erase in one step, as there is some iterator weirdness, so...
-
-    std::unordered_set<int64_t> to_erase;
-
-    for (auto const& [nid, data] : G.nodes()) {
-        if (G.node(nid).flow < flow) {
-            to_erase.insert(nid);
-        }
-    }
-
-    for (auto nid : to_erase) {
-        G.remove_node(nid);
-    }
-
-    fmt::print("Culled {} nodes based on flow < {}\n", to_erase.size(), flow);
 }
-
-constexpr float RELAXATION_FACTOR = .5F;
 
 ///
 /// \brief Relax node positions
@@ -200,47 +110,244 @@ void relax(SimpleGraph& G) {
     }
 }
 
-constexpr float RING_SCALE = .01F;
+struct DistanceToLineInfo {
+    float distance; ///< closest distance
+    float t;        ///< barycentric coordinate of closest point; 0 -> a, 1 -> b
+};
+
+///
+/// \brief Find the minimum distance of a point to a line
+/// \param p Point in question
+/// \param a Line segment start
+/// \param b Line segment end
+///
+DistanceToLineInfo min_distance_to_line(glm::vec3 p, glm::vec3 a, glm::vec3 b) {
+    glm::vec3 lunit = b - a;
+    float     len2  = glm::distance2(a, b);
+
+    if (len2 <= 0) return { glm::distance(a, p), 0 };
+
+    float t = std::clamp(glm::dot(p - a, b - a) / len2, 0.0F, 1.0F);
+
+    glm::vec3 proj = a + t * lunit;
+    return { glm::distance(p, proj), t };
+}
+
+///
+/// \brief Write a single edge to a voxel grid
+/// \param G Flow graph
+/// \param edge Edge to write
+/// \param grid Voxel grid to modify
+///
+/// Writes a 0 to 255 value to the grid, where 0 -> not in vessel, 255 -> in
+/// vessel, with a smooth transition between.
+///
+void write_edge(SimpleGraph const& G, Edge const& edge, ByteGrid& grid) {
+
+    auto from_id = edge.a;
+    auto to_id   = edge.b;
+
+    auto const& a = G.node(from_id);
+    auto const& b = G.node(to_id);
+
+    auto a_position = a.position * float(VOXEL_INFLATION);
+    auto b_position = b.position * float(VOXEL_INFLATION);
+
+    float size_a = compute_radius(a.flow) * VOXEL_INFLATION;
+    float size_b = compute_radius(b.flow) * VOXEL_INFLATION;
+
+    // if the size of the start is much larger than the end, we are going to
+    // clamp the size to end.
+    if (glm::abs(size_a - size_b) > 10) {
+        size_a = size_b;
+    }
+
+    // find the bounds of the grid that we should go over. this is our max
+    // radius + fuzzy radius from the line. so the bounding box of the line +-
+    // fuzzy distance
+
+    float max_radius = std::max(size_a, size_b);
+
+    float fuzzy_distance = 1 * VOXEL_INFLATION;
+
+    float total_distance = fuzzy_distance + max_radius;
+
+
+    BoundingBox bb;
+    bb.box_union(a.position);
+    bb.box_union(b.position);
+
+    auto box_from =
+        glm::ivec3(glm::floor(bb.minimum() - glm::vec3(total_distance))) *
+        VOXEL_INFLATION;
+    auto box_to =
+        glm::ivec3(glm::ceil(bb.maximum() + glm::vec3(total_distance))) *
+        VOXEL_INFLATION;
+
+    auto accessor = grid.getAccessor();
+
+    for (int i : xrange(box_from.x, box_to.x)) {
+        for (int j : xrange(box_from.y, box_to.y)) {
+            for (int k : xrange(box_from.z, box_to.z)) {
+
+                // what is our distance to the line?
+
+                auto [distance, t] =
+                    min_distance_to_line({ i, j, k }, a_position, b_position);
+
+                // what is the radius of the vessel at this point
+                float effective_radius = glm::mix(size_a, size_b, t);
+
+                float value = (distance - effective_radius) / fuzzy_distance;
+                value       = 1.0F - std::clamp(value, 0.0F, 1.0F);
+
+                uint8_t compressed_value = 255 * value;
+
+                openvdb::Coord ijk(i, j, k);
+
+                compressed_value =
+                    std::max(accessor.getValue(ijk), compressed_value);
+
+                accessor.setValue(ijk, compressed_value);
+            }
+        }
+    }
+}
+
+/// \brief Add an edge-voxel modification job to an executor
+static std::future<ByteGrid::Ptr>
+add_voxel_job(Executor&                           executor,
+              SimpleGraph const&                  G,
+              std::vector<std::shared_ptr<Edge>>& edge_cache) {
+    return executor.enqueue([local_edges = std::move(edge_cache), &G]() {
+        auto local_grid = ByteGrid::create(0.0F);
+
+        for (auto const& edge : local_edges) {
+            write_edge(G, *edge, *local_grid);
+        }
+
+        return local_grid;
+    });
+}
+
+///
+/// \brief Write all the edges of the flow graph to a voxel grid
+///
+static ByteGrid::Ptr write_edges_to_volume(SimpleGraph const& G) {
+    Executor executor;
+
+    size_t const edge_count = G.edges().size();
+
+    size_t const per_thread_edge_count =
+        std::ceil(edge_count / double(executor.size()));
+
+    fmt::print("Splitting edges: {} per thread.\n", per_thread_edge_count);
+
+    std::vector<std::shared_ptr<Edge>> edge_cache;
+
+    std::vector<std::future<ByteGrid::Ptr>> future_grids;
+
+    for (auto const& edge : G.edges()) {
+
+        edge_cache.push_back(edge);
+
+        if (edge_cache.size() > per_thread_edge_count) {
+            // kick off job
+            auto future = add_voxel_job(executor, G, edge_cache);
+
+            future_grids.emplace_back(std::move(future));
+
+            // reset it
+            edge_cache = std::vector<std::shared_ptr<Edge>>();
+        }
+    }
+
+    if (!edge_cache.empty()) {
+        auto future = add_voxel_job(executor, G, edge_cache);
+
+        future_grids.emplace_back(std::move(future));
+    }
+
+
+    // for each future grid, merge it into our main grid
+    fmt::print("Jobs launched, merging volumes...\n", per_thread_edge_count);
+
+    auto main_grid = ByteGrid::create(0.0F);
+
+    for (auto& future : future_grids) {
+        auto ptr = future.get();
+        // this does g = max(g, other)
+        openvdb::tools::compMax(*main_grid, *ptr);
+        // Documentation states that these ops always leave the second grid
+        // empty
+    }
+
+    return main_grid;
+}
 
 void write_mesh_to(SimpleGraph&                 G,
                    SimpleTransform const&       tf,
                    std::filesystem::path const& path) {
-    prune(G,
-          global_configuration().prune_rounds,
-          global_configuration().prune_flow);
+    // first prune, this should reduce our load for later steps
+    prune(G);
 
+    // relax nodes to reduce harsh bends
     relax(G);
 
-    MeshWriter writer;
+    // voxelize the flow graph. This will use an inflation factor to increase
+    // the resolution of the voxel grid to capture fine mesh details.
+    // TODO: make the factor automatic
+    fmt::print("Writing all edges to output volume.\n");
 
-    std::vector<int> vids_a, vids_b;
+    auto grid = write_edges_to_volume(G);
 
-    for (auto const& edge : G.edges()) {
+    fmt::print("Completed output volume.\n");
 
-        auto from_id = edge->a;
-        auto to_id   = edge->b;
+    // isosurf the voxel grid
+    std::vector<openvdb::Vec3s> position_list;
+    std::vector<openvdb::Vec3I> tri_list;
+    std::vector<openvdb::Vec4I> quad_list;
 
-        float size_a = compute_radius(G.node(from_id).flow, RING_SCALE);
-        float size_b = compute_radius(G.node(to_id).flow, RING_SCALE);
+    openvdb::tools::volumeToMesh(
+        *grid, position_list, tri_list, quad_list, .9 * 255);
 
-        auto tbasis = get_basis(G, from_id, to_id);
 
-        write_ring(writer, tbasis[0], size_a, vids_a);
-        write_ring(writer, tbasis[1], size_b, vids_b);
-
-        for (size_t i : xrange_over(vids_a)) {
-            size_t j = (i + 1) % vids_a.size();
-
-            writer.add_face(vids_a[i], vids_a[j], vids_b[i]);
-            writer.add_face(vids_b[j], vids_b[i], vids_a[j]);
-        }
+    // we need to do the inverse transform to get back to the input mesh
+    // coordinate space. We also need to account for the voxel inflation size.
+    for (auto& p : position_list) {
+        glm::vec3 np(p.x(), p.y(), p.z());
+        np = tf.inverted(np);
+        np /= VOXEL_INFLATION;
+        p = openvdb::Vec3s(np.x, np.y, np.z);
     }
 
-    for (auto& p : writer.positions()) {
-        p = tf.inverted(p);
-    }
+    fmt::print("Generated geometry with {} verts, {} tris, {} quads\n",
+               position_list.size(),
+               tri_list.size(),
+               quad_list.size());
 
     fmt::print("Writing geometry to {}\n", path.c_str());
 
-    writer.write_to(path);
+    // Dump in .obj format
+    {
+        std::ofstream stream(path);
+
+        stream << "o vascularization\n";
+
+        stream << "s 1\n";
+
+        for (auto p : position_list) {
+            stream << "v " << p.x() << " " << p.y() << " " << p.z() << "\n";
+        }
+
+        for (auto f : tri_list) {
+            stream << "f " << f.x() + 1 << " " << f.z() + 1 << " " << f.y() + 1
+                   << "\n";
+        }
+
+        for (auto f : quad_list) {
+            stream << "f " << f.y() + 1 << " " << f.x() + 1 << " " << f.w() + 1
+                   << " " << f.z() + 1 << "\n";
+        }
+    }
 }

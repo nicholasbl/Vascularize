@@ -7,7 +7,7 @@ CONFIG -= app_bundle qt
 
 QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.15
 
-LIBS += -L/usr/local/lib -lfmt
+LIBS += -L/usr/local/lib -lfmt -lopenvdb -ltbb -lHalf
 
 
 macx {

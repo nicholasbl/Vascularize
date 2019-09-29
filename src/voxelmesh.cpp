@@ -6,6 +6,8 @@
 
 #include <fmt/printf.h>
 
+#include <openvdb/openvdb.h>
+
 #include <glm/gtx/component_wise.hpp>
 #include <glm/gtx/intersect.hpp>
 
@@ -99,6 +101,10 @@ static SimpleTransform make_transform(glm::vec3 voxel_grid_resolution,
 
 
 VoxelResult voxelize(std::vector<MutableObject>&& objects, double voxel_size) {
+
+    //    openvdb::Int32Grid::Ptr grid = openvdb::Int32Grid::create(0);
+
+    //    auto bb = grid->evalActiveVoxelBoundingBox();
 
     BoundingBox total_bb;
 

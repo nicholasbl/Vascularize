@@ -15,6 +15,7 @@ Requirements:
 | -------- | ---- |
 | [glm](https://glm.g-truc.net/)      | 0.9.8 |
 | [fmtlib](https://fmt.dev/latest/index.html)   | 5.3.0 |
+| [OpenVDB](https://www.openvdb.org/) | 6.1.0 |
 | qmake<sup>1</sup> | - |
 
 <sup>1</sup>A full Qt install not required, only qmake.
@@ -56,9 +57,3 @@ A flow graph is created where high valued voxels are connected to low value voxe
 
 The graph is then turned into a mesh. We first prune parts of the graph, leaves of the graph, and areas where the flow is too small. At this point the nodes of the graph have a position that is regularized on a grid, so positions are perturbed by randomness, and then the positions are relaxed to smooth out hard edges. Each edge is turned into a tube (poorly), and emitted.
 
-
-## Todo
-
-* Improve mesh generation
-* Improve threading
-* Improve voxelization. Use a tet vol approach?

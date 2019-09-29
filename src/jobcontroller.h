@@ -20,7 +20,7 @@ class Executor {
     std::atomic<bool>       m_stop;
 
 public:
-    Executor(size_t);
+    Executor(size_t num_threads = 0);
     ~Executor();
 
     ///
@@ -87,6 +87,8 @@ public:
     JobController();
 
     ~JobController();
+
+    size_t num_threads() const;
 
     template <class Function>
     void add_job(Function f) {
