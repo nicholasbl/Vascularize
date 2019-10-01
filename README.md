@@ -13,8 +13,7 @@ Requirements:
 
 | Required Libraries / Packages  | Version >= |
 | -------- | ---- |
-| [glm](https://glm.g-truc.net/)      | 0.9.8 |
-| [fmtlib](https://fmt.dev/latest/index.html)   | 5.3.0 |
+| [glm](https://glm.g-truc.net/)      | 0.9.7 |
 | [OpenVDB](https://www.openvdb.org/) | 6.1.0 |
 | qmake<sup>1</sup> | - |
 
