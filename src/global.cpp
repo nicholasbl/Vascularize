@@ -1,5 +1,6 @@
 #include "global.h"
 
+#include <fmt/color.h>
 #include <fmt/printf.h>
 
 #include <fstream>
@@ -176,7 +177,7 @@ bool parse_arguments(int argc, char* argv[]) {
     // validate
 
     if (!std::filesystem::is_regular_file(c.mesh_path)) {
-        fmt::print_colored(fmt::red, "{} is not a valid file.", c.mesh_path);
+        fmt::print(fg(fmt::color::red), "{} is not a valid file.", c.mesh_path);
 
         return false;
     }

@@ -3,7 +3,6 @@
 
 #include <array>
 #include <memory>
-#include <span>
 #include <vector>
 
 /*!
@@ -178,11 +177,6 @@ public:
      * \brief Linear iterator support.
      */
     auto end() { return m_data.get() + size(); }
-
-    /*!
-     * \brief Access the underlying storage.
-     */
-    std::span<T> as_vector() { return std::span<T>(m_data, size()); }
 
     /*!
      * \brief Get a pointer to the first element in the grid.

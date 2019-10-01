@@ -4,6 +4,7 @@
 #include "wavefrontimport.h"
 #include "xrange.h"
 
+#include <fmt/color.h>
 #include <fmt/printf.h>
 #include <glm/gtx/norm.hpp>
 
@@ -193,7 +194,7 @@ public:
         fmt::print("Loading wavefront: {}\n", file_path);
 
         if (!std::filesystem::exists(file_path)) {
-            fmt::print_colored(fmt::red, "File does not exist\n");
+            fmt::print(fg(fmt::color::red), "File does not exist\n");
             return;
         }
 
