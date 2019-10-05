@@ -7,84 +7,10 @@
 #include <fmt/printf.h>
 
 #include <openvdb/openvdb.h>
-
-#include <glm/gtx/component_wise.hpp>
-#include <glm/gtx/intersect.hpp>
+#include <openvdb/tools/Composite.h>
+#include <openvdb/tools/MeshToVolume.h>
 
 #include <fstream>
-#include <random>
-
-///@{
-/// Random sources and distributions
-static std::random_device                    random_device;
-static std::mt19937                          random_generator(random_device());
-static std::uniform_real_distribution<float> random_distribution_1_1(-1.0, 1.0);
-///@}
-
-///
-/// \brief Generate a float, [-1, 1] to help build random directions
-///
-static float random_axis() { return random_distribution_1_1(random_generator); }
-
-///
-/// \brief Generate a random unit vector
-///
-static glm::vec3 random_dir() {
-    return glm::normalize(
-        glm::vec3(random_axis(), random_axis(), random_axis()) * 2.0f - 1.0f);
-}
-
-///
-/// \brief Ask if a point is within a mesh
-///
-static bool is_point_in_object(MutableObject const& o, glm::vec3 const& p) {
-    glm::vec3 direction = random_dir();
-
-    size_t isect_count = 0;
-
-    for (auto const& mesh : o.meshes) {
-        for (auto const& face : mesh.faces()) {
-            auto a = mesh.vertex()[face.indicies[0]].position;
-            auto b = mesh.vertex()[face.indicies[1]].position;
-            auto c = mesh.vertex()[face.indicies[2]].position;
-
-            glm::vec2 bary;
-            float     dist;
-
-            bool isects =
-                glm::intersectRayTriangle(p, direction, a, c, b, bary, dist);
-
-            isect_count += static_cast<float>(isects) * dist > 0;
-        }
-    }
-
-    bool is_even = isect_count % 2 == 0;
-
-    return !is_even;
-}
-
-///
-/// \brief Check every point in our grid to see if it is inside the mesh
-///
-void grid_fill(MutableObject const& object, Grid3D<bool>& volume) {
-    fmt::print("Starting grid fill\n");
-
-    static const glm::vec3 offset(.5);
-
-    JobController controller;
-
-    for (size_t i : xrange(volume.size_x())) {
-        for (size_t j : xrange(volume.size_y())) {
-            controller.add_job([&volume, &object, i, j]() {
-                for (size_t k : xrange(volume.size_z())) {
-                    auto cube_point = glm::vec3(i, j, k) + offset;
-
-                    volume(i, j, k) = is_point_in_object(object, cube_point);
-                }
-            });
-        }
-    }
-}
 
 static SimpleTransform make_transform(glm::vec3 voxel_grid_resolution,
                                       glm::vec3 mesh_volume_size,
@@ -101,10 +27,6 @@ static SimpleTransform make_transform(glm::vec3 voxel_grid_resolution,
 
 
 VoxelResult voxelize(std::vector<MutableObject>&& objects, double voxel_size) {
-
-    //    openvdb::Int32Grid::Ptr grid = openvdb::Int32Grid::create(0);
-
-    //    auto bb = grid->evalActiveVoxelBoundingBox();
 
     BoundingBox total_bb;
 
@@ -125,10 +47,6 @@ VoxelResult voxelize(std::vector<MutableObject>&& objects, double voxel_size) {
 
     fmt::print("Voxel resolution {}\n", voxel_grid_resolution);
 
-    Grid3D<bool> ret(voxel_grid_resolution.x,
-                     voxel_grid_resolution.y,
-                     voxel_grid_resolution.z);
-
     SimpleTransform tf = make_transform(
         voxel_grid_resolution, mesh_volume_size, total_bb.minimum());
 
@@ -148,9 +66,53 @@ VoxelResult voxelize(std::vector<MutableObject>&& objects, double voxel_size) {
 
     fmt::print("Starting object voxelization\n");
 
-    for (auto const& o : objects) {
-        grid_fill(o, ret);
+    auto volume_fraction =
+        openvdb::FloatGrid::create(std::numeric_limits<int>::lowest());
+
+    {
+        openvdb::CoordBBox cbb(0,
+                               0,
+                               0,
+                               voxel_grid_resolution.x,
+                               voxel_grid_resolution.y,
+                               voxel_grid_resolution.z);
+        volume_fraction->sparseFill(cbb, 0.0F);
     }
 
-    return { std::move(ret), tf };
+
+    for (auto const& o : objects) {
+        for (auto const& m : o.meshes) {
+            auto ptr = openvdb::tools::meshToVolume<openvdb::FloatGrid>(
+                m, {}, 1.0f, 1.0f);
+
+            openvdb::tools::compMax(*volume_fraction, *ptr);
+        }
+    }
+
+
+    openvdb::tools::foreach (volume_fraction->beginValueOn(),
+                             [](auto const& iter) {
+                                 float value = *iter;
+
+                                 iter.setValue(value < .5 ? 1.0F : -1.0F);
+                             });
+
+
+    openvdb::tools::prune(volume_fraction->tree());
+
+    {
+        auto bb = volume_fraction->evalActiveVoxelBoundingBox();
+        fmt::print("Volume fraction computed: {} {} {} x {} {} {}\n",
+                   bb.min().x(),
+                   bb.min().y(),
+                   bb.min().z(),
+                   bb.max().x(),
+                   bb.max().y(),
+                   bb.max().z());
+
+        fmt::print("Volume fraction bytes {}\n", volume_fraction->memUsage());
+    }
+
+
+    return { volume_fraction, tf };
 }

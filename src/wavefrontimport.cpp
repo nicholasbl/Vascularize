@@ -1,5 +1,6 @@
 #include "wavefrontimport.h"
 
+#include "global.h"
 #include "mutable_mesh.h"
 #include "wavefrontimport.h"
 #include "xrange.h"
@@ -48,8 +49,7 @@ inline int32_t get_raw_index(std::string_view s) {
 
     auto result = std::from_chars(s.data(), s.data() + s.size(), ret);
 
-    if (result.ec == std::errc::invalid_argument)
-        throw std::runtime_error("Malformed wavefront!");
+    if (result.ec == std::errc::invalid_argument) fatal("Malformed wavefront!");
     return ret;
 }
 
@@ -94,7 +94,7 @@ static WaveFrontVertSpec from_wavefront_face_string(std::string_view src) {
     auto size = splits.size();
 
     if (size == 0) {
-        throw std::runtime_error("Malformed obj face!");
+        fatal("Malformed obj face!");
     }
 
     ret.set_p(get_and_sanitize_index(splits[0]));

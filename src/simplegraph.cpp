@@ -1,5 +1,7 @@
 #include "simplegraph.h"
 
+#include "global.h"
+
 #include <fmt/printf.h>
 
 #include <cassert>
@@ -48,14 +50,28 @@ void SimpleGraph::remove_node(int64_t i) {
 }
 
 NodeData const& SimpleGraph::node(int64_t i) const {
-    return m_nodes.at(i).data;
+    try {
+        return m_nodes.at(i).data;
+    } catch (...) {
+        fatal("Missing node in graph!");
+    }
 }
 
-NodeData& SimpleGraph::node(int64_t i) { return m_nodes.at(i).data; }
+NodeData& SimpleGraph::node(int64_t i) {
+    try {
+        return m_nodes.at(i).data;
+    } catch (...) {
+        fatal("Missing node in graph!");
+    }
+}
 
 std::unordered_map<int64_t, Node::Ptr> const&
 SimpleGraph::edge(int64_t i) const {
-    return m_nodes.at(i).edges;
+    try {
+        return m_nodes.at(i).edges;
+    } catch (...) {
+        fatal("Cannot get edge; missing node in graph!");
+    }
 }
 
 struct UnionFind {
@@ -139,7 +155,7 @@ std::vector<EdgeKey> SimpleGraph::compute_min_spanning_tree() const {
 
     if ((ret.size() + 1) != nodes().size()) {
         fmt::print("Mismatch size {} {}\n", ret.size(), nodes().size());
-        throw std::runtime_error("Unable to continue");
+        fatal("Unable to continue");
     }
 
     return ret;

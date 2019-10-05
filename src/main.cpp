@@ -18,30 +18,31 @@ int main(int argc, char* argv[]) {
 
     openvdb::initialize();
 
-    fmt::print(fg(fmt::color::green),
+    fmt::print(fg(fmt::terminal_color::green),
                "Loading mesh {}, dicing at {}\n",
                global_configuration().mesh_path,
                global_configuration().cube_size);
 
     auto imported_mesh = import_wavefront(global_configuration().mesh_path);
 
-    fmt::print(fg(fmt::color::green), "Mesh imported, creating voxels...\n");
+    fmt::print(fg(fmt::terminal_color::green),
+               "Mesh imported, creating voxels...\n");
 
     auto [voxels, tf] = voxelize(std::move(imported_mesh.objects),
                                  global_configuration().cube_size);
 
-    fmt::print(fg(fmt::color::green),
+    fmt::print(fg(fmt::terminal_color::green),
                "Finished voxel grid, building flow graph...\n");
 
     auto flow_graph = generate_vessels(voxels, tf);
 
     auto out_path = global_configuration().output_path;
 
-    fmt::print(fg(fmt::color::green), "Creating geometry...\n");
+    fmt::print(fg(fmt::terminal_color::green), "Creating geometry...\n");
 
     write_mesh_to(flow_graph, tf, out_path);
 
-    fmt::print(fg(fmt::color::green), "Done.\n");
+    fmt::print(fg(fmt::terminal_color::green), "Done.\n");
 
     return 0;
 }

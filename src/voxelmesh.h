@@ -1,7 +1,6 @@
 #ifndef VOXELMESH_H
 #define VOXELMESH_H
 
-#include "grid.h"
 #include "mutable_mesh.h"
 
 #include <openvdb/openvdb.h>
@@ -36,9 +35,8 @@ public:
 };
 
 struct VoxelResult {
-    Grid3D<bool> voxels;
-
-    // openvdb::Int32Grid::Ptr distance_voxels;
+    // Grid3D<bool> voxels;
+    openvdb::FloatGrid::Ptr distance_voxels;
 
     SimpleTransform tf;
 };

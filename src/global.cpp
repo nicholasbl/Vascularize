@@ -132,7 +132,7 @@ bool parse_arguments(int argc, char* argv[]) {
         c.mesh_path = c.control_dir / "." / raw_path;
 
         if (!std::filesystem::is_regular_file(c.mesh_path)) {
-            throw std::runtime_error("Missing input mesh!");
+            fatal("Missing input mesh!");
         }
     }
 
@@ -177,7 +177,9 @@ bool parse_arguments(int argc, char* argv[]) {
     // validate
 
     if (!std::filesystem::is_regular_file(c.mesh_path)) {
-        fmt::print(fg(fmt::color::red), "{} is not a valid file.", c.mesh_path);
+        fmt::print(fg(fmt::terminal_color::red),
+                   "{} is not a valid file.",
+                   c.mesh_path);
 
         return false;
     }
@@ -190,3 +192,19 @@ bool parse_arguments(int argc, char* argv[]) {
 }
 
 Configuration const& global_configuration() { return config(); }
+
+[[noreturn]] void
+_fatal_msg_impl(const char* file, int line, std::string_view text) noexcept {
+    try {
+        fmt::print(fmt::fg(fmt::terminal_color::red),
+                   "Fatal in {}:{}; {}.",
+                   file,
+                   line,
+                   text);
+    } catch (...) {
+        // supposedly can happen
+        printf("Fatal in %s : %i", file, line);
+    }
+
+    exit(EXIT_FAILURE);
+}
