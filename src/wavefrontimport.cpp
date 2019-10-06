@@ -1,9 +1,11 @@
 #include "wavefrontimport.h"
 
+#include "global.h"
 #include "mutable_mesh.h"
 #include "wavefrontimport.h"
 #include "xrange.h"
 
+#include <fmt/color.h>
 #include <fmt/printf.h>
 #include <glm/gtx/norm.hpp>
 
@@ -19,7 +21,7 @@ using namespace mesh_detail;
 ///
 /// \brief The WaveFrontVertSpec struct models a wavefront vertex
 ///
-/// This was more complex if we needed normals, texture
+/// This would be more complex if we needed normals, texture
 ///
 struct WaveFrontVertSpec {
     // we cant just use a negative value to indicate unset.
@@ -47,8 +49,7 @@ inline int32_t get_raw_index(std::string_view s) {
 
     auto result = std::from_chars(s.data(), s.data() + s.size(), ret);
 
-    if (result.ec == std::errc::invalid_argument)
-        throw std::runtime_error("Malformed wavefront!");
+    if (result.ec == std::errc::invalid_argument) fatal("Malformed wavefront!");
     return ret;
 }
 
@@ -93,7 +94,7 @@ static WaveFrontVertSpec from_wavefront_face_string(std::string_view src) {
     auto size = splits.size();
 
     if (size == 0) {
-        throw std::runtime_error("Malformed obj face!");
+        fatal("Malformed obj face!");
     }
 
     ret.set_p(get_and_sanitize_index(splits[0]));
@@ -131,9 +132,6 @@ struct WaveFrontMtl {
     glm::vec3 Kd = glm::vec3(1); // for now
 };
 
-static constexpr size_t OBJECT_MESH_LIMIT = 4000;
-static constexpr size_t MESH_FACE_LIMIT   = 65000;
-
 class WaveFrontConverterData {
     std::filesystem::path      m_wavefront_file_path;
     std::vector<MutableObject> m_objects;
@@ -155,13 +153,7 @@ public:
     void push_mesh() {
         assert(!m_objects.empty());
 
-        if (current_object().meshes.size() < OBJECT_MESH_LIMIT) {
-            current_object().meshes.emplace_back();
-        } else {
-            std::string      new_name = current_object().name + "_1";
-            std::string_view r(new_name);
-            push_new_object(r);
-        }
+        current_object().meshes.emplace_back();
     }
 
     MutableObject& current_object() {
@@ -193,7 +185,7 @@ public:
         fmt::print("Loading wavefront: {}\n", file_path);
 
         if (!std::filesystem::exists(file_path)) {
-            fmt::print_colored(fmt::red, "File does not exist\n");
+            fmt::print(fg(fmt::color::red), "File does not exist\n");
             return;
         }
 
@@ -300,11 +292,6 @@ public:
 
             current_mesh().add(face);
 
-            if (current_mesh().vertex().size() >= MESH_FACE_LIMIT) {
-                m_vert_pos_map.clear();
-                push_mesh();
-                // qDebug() << "Mesh push";
-            }
         } else if (splits[0] == "g" or splits[0] == "o") {
             std::string default_name("WF OB ");
             default_name += std::to_string(m_objects.size());

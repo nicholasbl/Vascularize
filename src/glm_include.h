@@ -16,19 +16,6 @@
 #include <fmt/core.h>
 #include <fmt/format.h>
 
-
-#if GLM_VERSION_MAJOR != 0
-#error Unsupported GLM version: need 0.9.8
-#endif
-
-#if GLM_VERSION_MINOR != 9
-#error Unsupported GLM version: need 0.9.8
-#endif
-
-#if GLM_VERSION_PATCH < 8
-#error Unsupported GLM version: need 0.9.8
-#endif
-
 #include <array>
 
 // Custom formatting for glm types

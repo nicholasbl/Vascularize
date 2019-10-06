@@ -60,3 +60,19 @@ BoundingBox MutableMesh::bounds() const {
     return BoundingBox(glm::vec3(lower[0], lower[1], lower[2]),
                        glm::vec3(upper[0], upper[1], upper[2]));
 }
+
+
+size_t MutableMesh::polygonCount() const { return m_faces.size(); }
+
+size_t MutableMesh::pointCount() const { return 0; }
+
+size_t MutableMesh::vertexCount(size_t n) const { return 3; }
+
+void MutableMesh::getIndexSpacePoint(size_t          n,
+                                     size_t          v,
+                                     openvdb::Vec3d& pos) const {
+    auto const& vertex = m_verticies[m_faces[n].indicies[v]];
+
+    pos =
+        openvdb::Vec3d(vertex.position.x, vertex.position.y, vertex.position.z);
+}

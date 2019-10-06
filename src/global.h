@@ -33,4 +33,8 @@ bool parse_arguments(int argc, char* argv[]);
 ///
 Configuration const& global_configuration();
 
+[[noreturn]] void _fatal_msg_impl(const char*, int, std::string_view) noexcept;
+
+#define fatal(S) _fatal_msg_impl(__FILE__, __LINE__, S)
+
 #endif // GLOBAL_H

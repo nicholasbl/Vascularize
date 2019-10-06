@@ -20,7 +20,7 @@ class Executor {
     std::atomic<bool>       m_stop;
 
 public:
-    Executor(size_t);
+    Executor(size_t num_threads = 0);
     ~Executor();
 
     ///
@@ -86,11 +86,19 @@ class JobController {
 public:
     JobController();
 
+    /// \brief Destroy the controller. Note that this flushes work, so you
+    /// should watch your scopes to make sure you don't proceed before all jobs
+    /// are completed.
     ~JobController();
 
+    size_t num_threads() const;
+
+    ///
+    /// \brief Add a job to the controller. It'll launch the function in another
+    /// thread, and will block to make sure not too many jobs are in flight.
+    ///
     template <class Function>
     void add_job(Function f) {
-        // check_add();
 
         if (m_active_jobs.size() == m_max_threads) {
             flush();

@@ -4,6 +4,8 @@
 #include "boundingbox.h"
 #include "glm_include.h"
 
+#include <openvdb/openvdb.h>
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -75,6 +77,13 @@ public:
      * rotation)
      */
     void transform(glm::mat4 const&);
+
+    // support openVDB MeshDataAdapter concept
+public:
+    size_t polygonCount() const;        // Total number of polygons
+    size_t pointCount() const;          // Total number of points
+    size_t vertexCount(size_t n) const; // Vertex count for polygon n
+    void   getIndexSpacePoint(size_t n, size_t v, openvdb::Vec3d& pos) const;
 };
 
 #endif // MUTMESH_H

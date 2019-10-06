@@ -1,8 +1,9 @@
 #ifndef GENERATE_VESSELS_H
 #define GENERATE_VESSELS_H
 
-#include "grid.h"
 #include "simplegraph.h"
+
+#include <openvdb/openvdb.h>
 
 class SimpleTransform;
 
@@ -11,8 +12,8 @@ class SimpleTransform;
 /// \param volume_fraction Voxel grid representing volume fraction
 /// \param transform Mesh to grid transform
 ///
-SimpleGraph generate_vessels(Grid3D<bool> const&    volume_fraction,
-                             SimpleTransform const& transform);
+SimpleGraph generate_vessels(openvdb::FloatGrid::Ptr const& volume_fraction,
+                             SimpleTransform const&         transform);
 
 
 #endif // GENERATE_VESSELS_H

@@ -3,6 +3,16 @@
 #include <fmt/printf.h>
 
 Executor::Executor(size_t num_threads) {
+
+    if (num_threads == 0) {
+        num_threads = std::thread::hardware_concurrency();
+
+        // catch the case if the implementation doesnt know
+        if (num_threads < 1) {
+            num_threads = 4;
+        }
+    }
+
     m_stop = false;
 
     for (size_t i = 0; i < num_threads; ++i) {

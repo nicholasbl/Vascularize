@@ -10,15 +10,19 @@
 
 #include <fmt/printf.h>
 
+#include <openvdb/tools/GridOperators.h>
+
 #include <fstream>
 #include <queue>
 #include <random>
 #include <stack>
 #include <unordered_set>
 
+inline bool is_vfrac_in(float value) { return value > .5F; }
+
 /// \brief All adjacent directions for a given cell
-static std::vector<glm::i64vec3> const directions = []() {
-    std::vector<glm::i64vec3> ret;
+static std::vector<glm::ivec3> const directions = []() {
+    std::vector<glm::ivec3> ret;
 
     std::array<int, 3> ld = { -1, 0, 1 };
 
@@ -43,9 +47,14 @@ static std::vector<glm::i64vec3> const directions = []() {
 ///
 template <class GridType, class Function>
 void over_grid(GridType& g, Function&& f) {
-    for (size_t i : xrange(g.size_x())) {
-        for (size_t j : xrange(g.size_y())) {
-            for (size_t k : xrange(g.size_z())) {
+    auto bb = g.evalActiveVoxelBoundingBox();
+
+    auto l = bb.min();
+    auto h = bb.max();
+
+    for (int32_t i : xrange(l.x(), h.x())) {
+        for (int32_t j : xrange(l.y(), h.y())) {
+            for (int32_t k : xrange(l.z(), h.z())) {
                 f(i, j, k);
             }
         }
@@ -57,17 +66,20 @@ void over_grid(GridType& g, Function&& f) {
 ///
 /// \return id, or -1 if coordinate is invalid.
 ///
-template <class T>
-int64_t id_for_coord(Grid3D<T> const& v, int64_t x, int64_t y, int64_t z) {
-    if (x < 0 or y < 0 or z < 0) return -1;
+static int64_t
+id_for_coord(openvdb::CoordBBox const& bb, int32_t x, int32_t y, int32_t z) {
 
-    auto lx = static_cast<size_t>(x);
-    auto ly = static_cast<size_t>(y);
-    auto lz = static_cast<size_t>(z);
+    if (!bb.isInside({ x, y, z })) return -1;
 
-    if (lx >= v.size_x() or ly >= v.size_y() or lz >= v.size_z()) return -1;
+    auto lx = static_cast<int64_t>(x);
+    auto ly = static_cast<int64_t>(y);
+    auto lz = static_cast<int64_t>(z);
 
-    return v.index(lx, ly, lz);
+    auto hx = bb.max().x();
+    auto hy = bb.max().y();
+
+
+    return lx + hx * (ly + hy * lz);
 };
 
 ///
@@ -75,16 +87,25 @@ int64_t id_for_coord(Grid3D<T> const& v, int64_t x, int64_t y, int64_t z) {
 /// \param volume_fraction Grid of what is in and outside of a mesh
 /// \param G Superflow graph to build into
 ///
-static void build_initial_networks(Grid3D<bool> const&    volume_fraction,
-                                   SimpleTransform const& transform,
-                                   SimpleGraph&           G) {
+static void build_initial_networks(openvdb::FloatGrid const& volume_fraction,
+                                   SimpleTransform const&    transform,
+                                   SimpleGraph&              G) {
 
-    auto get_id = [&](int64_t x, int64_t y, int64_t z) -> int64_t {
-        return id_for_coord(volume_fraction, x, y, z);
+    auto const& bb = volume_fraction.evalActiveVoxelBoundingBox();
+
+    {
+        auto bbmin = bb.min();
+        if (bbmin.x() < 0 or bbmin.y() < 0 or bbmin.z() < 0) {
+            fatal("Bounding box should be all positive.");
+        }
+    }
+
+
+    auto get_id = [&](int32_t x, int32_t y, int32_t z) -> int64_t {
+        return id_for_coord(bb, x, y, z);
     };
 
-    // populate graph with nodes first
-
+    // populate graph with nodes
     // we can pre compute distances to the root here
 
     std::optional<glm::vec3> point;
@@ -94,6 +115,7 @@ static void build_initial_networks(Grid3D<bool> const&    volume_fraction,
         point = transform(*(global_configuration().root_around));
     }
 
+    // compute the distance to the user-defined root, if it exists
     auto distance_to_root = [point, &max_distance](glm::vec3 coordinate) {
         float d;
 
@@ -110,8 +132,11 @@ static void build_initial_networks(Grid3D<bool> const&    volume_fraction,
         return d;
     };
 
-    over_grid(volume_fraction, [&](size_t i, size_t j, size_t k) {
-        bool is_in = volume_fraction(i, j, k);
+    auto accessor = volume_fraction.getConstAccessor();
+
+    // add node and fill with distance to root
+    over_grid(volume_fraction, [&](int32_t i, int32_t j, int32_t k) {
+        bool is_in = is_vfrac_in(accessor.getValue({ i, j, k }));
 
         if (!is_in) return;
 
@@ -126,6 +151,7 @@ static void build_initial_networks(Grid3D<bool> const&    volume_fraction,
         G.add_node(cell_id, data);
     });
 
+    // normalize
     for (auto& [key, value] : G.nodes()) {
         value.data.depth /= max_distance;
     }
@@ -139,91 +165,109 @@ static std::uniform_real_distribution<float> random_distribution_0_1(0.0, 1.0);
 static std::uniform_real_distribution<float> random_distribution_1_1(-1.0, 1.0);
 ///@}
 
-///
-/// \brief Compute distances of nodes from the edge of the mesh
-/// \param volume_fraction What is in and out of the mesh
-/// \param G Superflow graph
-/// \param random_scale Random perturbation of the distances
-///
-/// Distances are normalized 0 -> 1
-///
-static void compute_distances(Grid3D<bool> const& volume_fraction,
-                              SimpleGraph&        G,
-                              float               random_scale) {
 
-    // this is stupid
+///
+/// \brief Consider the distance to the root and distances to the edge of the
+/// mesh, and use that to store a 'depth'
+///
+/// \param volume_fraction Volume fraction
+/// \param G Superflow graph
+/// \param random_scale Noise scale
+///
+static void sanitize_distances(openvdb::FloatGrid& volume_fraction,
+                               SimpleGraph&        G,
+                               float               random_scale) {
+
+    // this is stupid, but we use a list of points that are near the border to
+    // compute a distance transform
     std::vector<glm::vec3> zero_list;
 
-    over_grid(volume_fraction, [&](size_t i, size_t j, size_t k) {
-        bool is_in = volume_fraction(i, j, k);
+    { // compute the zero list
 
-        if (is_in) return;
+        auto accessor = volume_fraction.getConstAccessor();
 
-        // if all adj are outside, bail.
+        auto bb = volume_fraction.evalActiveVoxelBoundingBox();
 
-        bool keep = false;
+        over_grid(volume_fraction, [&](int i, int j, int k) {
+            bool is_in = is_vfrac_in(accessor.getValue({ i, j, k }));
 
-        for (auto const& dir : directions) {
-            auto other_coord = glm::i64vec3(i, j, k) + dir;
+            // only want ones outside the volume
+            if (is_in) return;
 
-            int64_t other_cell_id = id_for_coord(
-                volume_fraction, other_coord.x, other_coord.y, other_coord.z);
+            // if all adj are outside, bail.
 
-            if (other_cell_id < 0) continue;
+            bool keep = false;
 
-            bool other_is_in = volume_fraction(other_coord);
+            for (auto const& dir : directions) {
+                auto other_coord = glm::ivec3(i, j, k) + dir;
 
-            if (other_is_in) {
-                // adjacent to volume. keep;
-                keep = true;
+                int64_t other_cell_id = id_for_coord(
+                    bb, other_coord.x, other_coord.y, other_coord.z);
+
+                if (other_cell_id < 0) continue;
+
+                bool other_is_in = is_vfrac_in(accessor.getValue(
+                    { other_coord.x, other_coord.y, other_coord.z }));
+
+                if (other_is_in) {
+                    // adjacent to volume. keep;
+                    keep = true;
+                    break;
+                }
             }
-        }
 
-        if (keep) {
-            zero_list.emplace_back(i, j, k);
-        }
-    });
+            if (keep) {
+                zero_list.emplace_back(i, j, k);
+            }
+        });
+    }
 
-
-    // compute min distances to zero points
+    // now compute distances to these points and store the min for each node in
+    // the graph
 
     std::unordered_map<int64_t, float> distances;
 
-    // preallocate, because threads
+    // preallocate, because threads will be concurrently updating this structure
     for (auto& [key, node] : G.nodes()) {
         distances[key] = 0;
     }
 
-    JobController controller;
+    { // compute all in parallel
+        // make sure the controller goes out of scope to finish
+        JobController controller;
 
-    for (auto& [key, node] : G.nodes()) {
-        int64_t   nid   = key;
-        NodeData* ndata = &node.data;
+        fmt::print("Computing signed distances to border\n");
 
-        controller.add_job(
-            [nid, ndata, &zero_list, &distances, random_scale]() {
-                // find min distance
+        for (auto& [key, node] : G.nodes()) {
+            int64_t   nid   = key;
+            NodeData* ndata = &node.data;
 
-                auto node_coord = ndata->position;
+            controller.add_job(
+                [nid, ndata, &zero_list, &distances, random_scale]() {
+                    // find min distance
+                    auto node_coord = ndata->position;
 
-                float min_squared_distance = std::numeric_limits<float>::max();
+                    float min_squared_distance =
+                        std::numeric_limits<float>::max();
 
-                for (auto const& z : zero_list) {
-                    float d = glm::distance2(node_coord, z);
+                    for (auto const& z : zero_list) {
+                        float d = glm::distance2(node_coord, z);
 
-                    if (d < min_squared_distance) {
-                        min_squared_distance = d;
+                        if (d < min_squared_distance) {
+                            min_squared_distance = d;
+                        }
                     }
-                }
 
-                float random_value =
-                    random_scale * random_distribution_0_1(random_generator);
+                    float random_value = random_scale * random_distribution_0_1(
+                                                            random_generator);
 
-                // ndata->depth *= min_squared_distance + random_value;
-
-                distances.at(nid) = min_squared_distance + random_value;
-            });
+                    distances.at(nid) = min_squared_distance + random_value;
+                });
+        }
     }
+
+    // we want distances to be 0 at the core of the input mesh
+    fmt::print("Normalizing\n");
 
     // find the max distance
     auto iter = std::max_element(
@@ -233,38 +277,44 @@ static void compute_distances(Grid3D<bool> const& volume_fraction,
 
     float max_distance = iter->second;
 
-    // fmt::print("MAX DISTANCE {}\n", max_distance);
-
     for (auto& [key, value] : distances) {
         value /= max_distance;
     }
 
     for (auto& [key, node] : G.nodes()) {
-        node.data.depth = 1.0F - (distances[key] * node.data.depth);
+        node.data.depth = 1.0F - (distances.at(key) * node.data.depth);
+    }
+
+    if (G.nodes().size() == 0) {
+        fatal("No nodes in graph!");
     }
 }
 
 ///
 /// \brief Connect all adjacent nodes based on high-to-low distances
 ///
-static void connect_all_grad(Grid3D<bool> const& volume_fraction,
-                             SimpleGraph&        G) {
+static void connect_all_grad(openvdb::FloatGrid const& volume_fraction,
+                             SimpleGraph&              G) {
 
-    over_grid(volume_fraction, [&](size_t i, size_t j, size_t k) {
-        if (!volume_fraction(i, j, k)) return;
+    auto bb       = volume_fraction.evalActiveVoxelBoundingBox();
+    auto accessor = volume_fraction.getConstAccessor();
 
-        auto this_id = id_for_coord(volume_fraction, i, j, k);
+    over_grid(volume_fraction, [&](int i, int j, int k) {
+        if (accessor.getValue({ i, j, k }) < 0) return;
+
+        auto this_id = id_for_coord(bb, i, j, k);
 
 
         for (auto const& dir : directions) {
-            auto other_coord = glm::i64vec3(i, j, k) + dir;
+            auto other_coord = glm::ivec3(i, j, k) + dir;
 
-            int64_t other_cell_id = id_for_coord(
-                volume_fraction, other_coord.x, other_coord.y, other_coord.z);
+            int64_t other_cell_id =
+                id_for_coord(bb, other_coord.x, other_coord.y, other_coord.z);
 
             if (other_cell_id < 0) continue;
 
-            bool other_is_in = volume_fraction(other_coord);
+            bool other_is_in = is_vfrac_in(accessor.getValue(
+                { other_coord.x, other_coord.y, other_coord.z }));
 
             if (!other_is_in) continue;
 
@@ -282,6 +332,10 @@ static void connect_all_grad(Grid3D<bool> const& volume_fraction,
     });
 }
 
+///
+/// \brief We only support one component for now, so clean out all but the
+/// largest component.
+///
 static void clean_components(SimpleGraph& G) {
 
     // which is the largest?
@@ -289,8 +343,7 @@ static void clean_components(SimpleGraph& G) {
     auto components = G.components();
 
     if (components.empty()) {
-        throw std::runtime_error(
-            "No components found! Broken component cleaner!");
+        fatal("No components found! Broken component cleaner!");
     }
 
     fmt::print("Found {} components\n", components.size());
@@ -308,7 +361,7 @@ static void clean_components(SimpleGraph& G) {
         std::max_element(component_counts.begin(), component_counts.end());
 
     if (iter == component_counts.end()) {
-        throw std::runtime_error("Broken component counter!");
+        fatal("Broken component counter!");
     }
 
     size_t largest_component =
@@ -496,7 +549,7 @@ static std::vector<int64_t> topological_sort(SimpleTree const& tree) {
     }
 
     if (in_degree_map.size()) {
-        throw std::runtime_error("Graph is not DAG!");
+        fatal("Graph is not DAG!");
     }
 
     return ret;
@@ -565,42 +618,50 @@ build_final_graph(std::unordered_map<int64_t, float> const& flow_data,
 ///
 /// \brief Dump voxels to a csv
 ///
-static void voxel_debug_dump(Grid3D<bool> const& grid, SimpleGraph const& G) {
+static void voxel_debug_dump(openvdb::FloatGrid::Ptr const& grid,
+                             SimpleGraph const&             G) {
     std::ofstream stream(global_configuration().control_dir / "voxels.csv");
 
-    for (size_t i : xrange(grid.size_x())) {
-        for (size_t j : xrange(grid.size_y())) {
-            for (size_t k : xrange(grid.size_z())) {
-                if (!grid(i, j, k)) continue;
+    stream << "x,y,z,depth,vfrac\n";
 
-                auto id = grid.index(i, j, k);
+    auto bb = grid->evalActiveVoxelBoundingBox();
 
-                stream << i << "," << j << "," << k << "," << G.node(id).depth
-                       << std::endl;
-            }
-        }
-    }
+    auto accessor = grid->getConstAccessor();
+
+    over_grid(*grid, [&](int i, int j, int k) {
+        auto value = accessor.getValue({ i, j, k });
+
+        if (!is_vfrac_in(value)) return;
+
+        auto id = id_for_coord(bb, i, j, k);
+
+        if (id < 0) return;
+
+        stream << i << "," << j << "," << k << "," << G.node(id).depth << ","
+               << value << "\n";
+    });
 }
 
 
-SimpleGraph generate_vessels(Grid3D<bool> const&    volume_fraction,
-                             SimpleTransform const& transform) {
+SimpleGraph generate_vessels(openvdb::FloatGrid::Ptr const& volume_fraction,
+                             SimpleTransform const&         transform) {
 
     SimpleGraph G;
 
     fmt::print("Building initial networks\n");
 
-    build_initial_networks(volume_fraction, transform, G);
+    build_initial_networks(*volume_fraction, transform, G);
 
-    fmt::print("Graph has {} nodes. Computing distances\n", G.nodes().size());
-    compute_distances(volume_fraction, G, 10);
+    fmt::print("Graph has {} nodes\n", G.nodes().size());
+
+    sanitize_distances(*volume_fraction, G, 10);
 
     if (global_configuration().dump_voxels) {
         voxel_debug_dump(volume_fraction, G);
     }
 
     fmt::print("Connecting nodes\n");
-    connect_all_grad(volume_fraction, G);
+    connect_all_grad(*volume_fraction, G);
 
     // we may get multiple components. For now, just pick the largest one.
     fmt::print("Cleaning components\n");
