@@ -21,7 +21,7 @@ using namespace mesh_detail;
 ///
 /// \brief The WaveFrontVertSpec struct models a wavefront vertex
 ///
-/// This was more complex if we needed normals, texture
+/// This would be more complex if we needed normals, texture
 ///
 struct WaveFrontVertSpec {
     // we cant just use a negative value to indicate unset.
@@ -132,9 +132,6 @@ struct WaveFrontMtl {
     glm::vec3 Kd = glm::vec3(1); // for now
 };
 
-static constexpr size_t OBJECT_MESH_LIMIT = 4000;
-static constexpr size_t MESH_FACE_LIMIT   = 65000;
-
 class WaveFrontConverterData {
     std::filesystem::path      m_wavefront_file_path;
     std::vector<MutableObject> m_objects;
@@ -156,13 +153,7 @@ public:
     void push_mesh() {
         assert(!m_objects.empty());
 
-        if (current_object().meshes.size() < OBJECT_MESH_LIMIT) {
-            current_object().meshes.emplace_back();
-        } else {
-            std::string      new_name = current_object().name + "_1";
-            std::string_view r(new_name);
-            push_new_object(r);
-        }
+        current_object().meshes.emplace_back();
     }
 
     MutableObject& current_object() {
@@ -301,11 +292,6 @@ public:
 
             current_mesh().add(face);
 
-            if (current_mesh().vertex().size() >= MESH_FACE_LIMIT) {
-                m_vert_pos_map.clear();
-                push_mesh();
-                // qDebug() << "Mesh push";
-            }
         } else if (splits[0] == "g" or splits[0] == "o") {
             std::string default_name("WF OB ");
             default_name += std::to_string(m_objects.size());

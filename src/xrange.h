@@ -17,6 +17,8 @@
 /// for (size_t i : xrange(bound)) {}
 /// \endcode
 ///
+/// This generates the exact same assembly as the former at -02.
+///
 /// Includes \code xrange_over \endcode which can be used with a container.
 ///
 /// \code

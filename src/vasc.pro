@@ -26,7 +26,6 @@ HEADERS += \
     generate_vessels.h \
     glm_include.h \
     global.h \
-    grid.h \
     jobcontroller.h \
     mesh_write.h \
     mutable_mesh.h \
